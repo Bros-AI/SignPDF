@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Signature App</title>
+    <!-- External libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Hero Section -->
+    <div class="hero-section">
+        <h1 class="hero-title">🚀 Sign Documents Like a Pro!</h1>
+        <p class="hero-subtitle">Our powerful document signing platform makes it easy to add your signature to any PDF. Perfect for contracts, agreements, and official documents.</p>
+    </div>
+    
+    <div class="container">
+        <div class="alert alert-success" id="successAlert"></div>
+        <div class="alert alert-error" id="errorAlert"></div>
+        
+        <div class="app-container">
+            <div class="step" id="step1">
+                <div class="step-title">
+                    <div class="number">1</div>
+                    <h2>Add Your Signature & Initials</h2>
+                </div>
+                
+                <div class="signature-tab-container">
+                    <div class="signature-tabs">
+                        <div class="signature-tab active" data-tab="signature">Signature</div>
+                        <div class="signature-tab" data-tab="paraf">Initials/Paraf</div>
+                    </div>
+                    
+                    <!-- Signature Tab Content -->
+                    <div class="signature-tab-content active" id="signature-tab">
+                        <div class="signature-options">
+                            <div class="option-btn active" id="uploadOption">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                Upload Image
+                            </div>
+                            <div class="option-btn" id="drawOption">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+                                Draw Signature
+                            </div>
+                        </div>
+                        
+                        <div id="uploadContainer">
+                            <div class="dropzone" id="signatureDropzone">
+                                <p>Drag and drop your signature image here</p>
+                                <p>or</p>
+                                <input type="file" id="signatureUpload" accept="image/*" style="display: none;" />
+                                <button class="upload-btn" id="browseSignature">Browse Files</button>
+                            </div>
+                            
+                            <div class="preview-container">
+                                <img id="signaturePreview" alt="Signature Preview" />
+                            </div>
+                        </div>
+                        
+                        <div class="signature-pad-container" id="drawContainer">
+                            <canvas id="signaturePad"></canvas>
+                            <div class="signature-pad-actions">
+                                <button class="action-btn clear-btn" id="clearSignature">Clear</button>
+                                <button class="action-btn save-btn" id="saveSignature">Save Signature</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Paraf Tab Content -->
+                    <div class="signature-tab-content" id="paraf-tab">
+                        <div class="signature-options">
+                            <div class="option-btn active" id="uploadParafOption">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                Upload Image
+                            </div>
+                            <div class="option-btn" id="drawParafOption">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+                                Draw Initials
+                            </div>
+                        </div>
+                        
+                        <div id="uploadParafContainer">
+                            <div class="dropzone" id="parafDropzone">
+                                <p>Drag and drop your initials image here</p>
+                                <p>or</p>
+                                <input type="file" id="parafUpload" accept="image/*" style="display: none;" />
+                                <button class="upload-btn" id="browseParaf">Browse Files</button>
+                            </div>
+                            
+                            <div class="preview-container">
+                                <img id="parafPreview" alt="Initials Preview" style="max-width: 150px; max-height: 80px; display: none;" />
+                            </div>
+                        </div>
+                        
+                        <div class="signature-pad-container" id="drawParafContainer" style="display: none;">
+                            <canvas id="parafPad"></canvas>
+                            <div class="signature-pad-actions">
+                                <button class="action-btn clear-btn" id="clearParaf">Clear</button>
+                                <button class="action-btn save-btn" id="saveParaf">Save Initials</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="step" id="step2">
+                <div class="step-title">
+                    <div class="number">2</div>
+                    <h2>Upload Document</h2>
+                </div>
+                
+                <div class="dropzone" id="documentDropzone">
+                    <p>Drag and drop your PDF document here</p>
+                    <p>or</p>
+                    <input type="file" id="documentUpload" accept=".pdf" style="display: none;" />
+                    <button class="upload-btn" id="browseDocument">Browse Files</button>
+                </div>
+                
+                <div class="loading" id="documentLoading" style="display: none;">
+                    <div class="spinner"></div>
+                </div>
+                
+                <div class="document-preview" id="documentPreview">
+                    <div>
+                        <p>Page <span id="currentPage">1</span> of <span id="totalPages">1</span></p>
+                        <div class="pagination" id="pagination"></div>
+                    </div>
+                    
+                    <div class="canvas-container">
+                        <canvas id="pdfCanvas"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="step" id="step3">
+                <div class="step-title">
+                    <div class="number">3</div>
+                    <h2>Sign Your Document</h2>
+                </div>
+                
+                <p>Position your signature on the document by dragging it to the desired location.</p>
+                <p>Use the controls below to navigate between pages and add signatures to multiple pages.</p>
+                
+                <div class="document-actions">
+                    <button class="action-btn primary-btn" id="addSignature">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+                        Add Signature
+                    </button>
+                    <button class="action-btn primary-btn" id="addBottomSignature">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+                        Add to Bottom
+                    </button>
+                    <button class="action-btn info-btn" id="addParaf">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15h18"></path><path d="M3 7h18"></path><path d="M3 11h18"></path></svg>
+                        Add Initials
+                    </button>
+                    <button class="action-btn warning-btn" id="addAllParaf">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                        Paraf All Pages
+                    </button>
+                    <button class="action-btn success-btn" id="saveDocument">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="8 17 12 21 16 17"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"></path></svg>
+                        Save Signed Document
+                    </button>
+                </div>
+                
+                <div class="progress-bar" id="progressBar">
+                    <div class="progress" id="progress"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <footer class="footer">
+        <p>Created with ❤️ by <a href="https://github.com/BrosG" target="_blank">Gauthier Bros</a></p>
+    </footer>
+    
+    <!-- PDF.js worker script -->
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    
+    <!-- Custom JavaScript -->
+    <script src="script.js"></script>
+</body>
+</html>
