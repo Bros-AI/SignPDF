@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>og</title>
+<style>
+* { margin: 0; box-sizing: border-box; }
+body { width: 1200px; height: 630px; overflow: hidden;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: linear-gradient(130deg, #3f37c9 0%, #4361ee 55%, #4895ef 100%);
+  color: #fff; display: flex; align-items: center; padding: 0 70px; position: relative; }
+.left { max-width: 640px; z-index: 2; }
+h1 { font-size: 86px; font-weight: 800; letter-spacing: -2px; margin-bottom: 18px; }
+h1 .pen { font-size: 72px; }
+p.tag { font-size: 34px; font-weight: 600; line-height: 1.35; opacity: .95; margin-bottom: 26px; }
+ul { list-style: none; font-size: 24px; opacity: .9; display: flex; flex-direction: column; gap: 8px; }
+li::before { content: '✓  '; color: #7CF2C0; font-weight: 800; }
+.brand { position: absolute; bottom: 34px; left: 70px; font-size: 24px; font-weight: 700; opacity: .85; }
+.paper { position: absolute; right: -40px; top: 60px; width: 470px; height: 620px;
+  background: #fff; border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,.35);
+  transform: rotate(6deg); padding: 44px 40px; color: #333; }
+.paper h3 { color: #222; font-size: 22px; margin-bottom: 14px; }
+.line { height: 11px; background: #e7e9f2; border-radius: 6px; margin: 12px 0; }
+.line.s { width: 62%; }
+.sig { margin-top: 26px; }
+.sig svg { display:block; }
+.stamp { position: absolute; right: 52px; bottom: 150px; width: 240px; transform: rotate(-9deg); opacity: .96; }
+</style></head>
+<body>
+  <div class="left">
+    <h1><span class="pen">🖋️</span> SignPDF</h1>
+    <p class="tag">Sign, initial &amp; stamp your PDFs — free, private, in your browser.</p>
+    <ul>
+      <li>Realistic company stamps · 11 country styles</li>
+      <li>Background removal for scanned signatures</li>
+      <li>No account · files never leave your device</li>
+    </ul>
+  </div>
+  <div class="brand">bros.ai · github.com/Bros-AI/SignPDF</div>
+  <div class="paper">
+    <h3>CONTRAT</h3>
+    <div class="line"></div><div class="line"></div><div class="line s"></div>
+    <div class="line"></div><div class="line s"></div><div class="line"></div>
+    <div class="sig">
+      <svg width="300" height="90" viewBox="0 0 300 90">
+        <path d="M15 65 C 60 5, 95 85, 140 45 S 220 15, 285 55" fill="none" stroke="#1d2b4f" stroke-width="4.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <img class="stamp" id="stampImg" alt="">
+  </div>
+<script src="i18n.js"></script>
+<script src="stamp.js"></script>
+<script>
+  const cfg = { shape:'round', special:null, color:'#2f4e9e', font:'sans', border:'double', separator:'star',
+    topText:'MA SOCIÉTÉ SARL', bottomText:'PARIS — FRANCE',
+    lines:["12 RUE DE L'EXEMPLE",'75001 PARIS','SIRET 123 456 789 00012'],
+    wear:38, pressure:45, showDate:false, tilt:true, seed:7 };
+  document.getElementById('stampImg').src = StampDesigner.render(cfg).toDataURL('image/png');
+</script>
+</body></html>

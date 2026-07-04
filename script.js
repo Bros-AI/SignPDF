@@ -869,11 +869,67 @@
 
             $('progressBar').hidden = true;
             toast(t('msgSaved'), 'success');
+            maybeShowSupport();
         } catch (error) {
             console.error('Error saving document:', error);
             $('progressBar').hidden = true;
             toast(t('msgSaveError', { error: error.message }), 'error');
         }
+    };
+
+    // ------------------------------------------------------- support modal
+
+    const APP_URL = 'https://bros-ai.github.io/SignPDF/';
+
+    const updateShareLinks = () => {
+        const u = encodeURIComponent(APP_URL);
+        const s = encodeURIComponent(t('shareText'));
+        $('shareX').href = `https://twitter.com/intent/tweet?text=${s}&url=${u}`;
+        $('shareLinkedIn').href = `https://www.linkedin.com/sharing/share-offsite/?url=${u}`;
+        $('shareReddit').href = `https://www.reddit.com/submit?url=${u}&title=${s}`;
+        $('shareEmail').href = `mailto:?subject=${encodeURIComponent('SignPDF')}&body=${s}%0A%0A${u}`;
+    };
+
+    const openSupportModal = () => {
+        updateShareLinks();
+        $('supportOverlay').hidden = false;
+        document.body.style.overflow = 'hidden';
+    };
+
+    const closeSupportModal = () => {
+        $('supportOverlay').hidden = true;
+        document.body.style.overflow = '';
+    };
+
+    // Shown once per session, right after a successful export — the download
+    // is never blocked, the modal only rides along with it.
+    const maybeShowSupport = () => {
+        try {
+            if (sessionStorage.getItem('signpdf.support.shown')) return;
+            sessionStorage.setItem('signpdf.support.shown', '1');
+        } catch (e) { /* blocked storage — still show once */ }
+        setTimeout(openSupportModal, 900);
+    };
+
+    const initSupportModal = () => {
+        $('openSupport').addEventListener('click', openSupportModal);
+        $('supportClose').addEventListener('click', closeSupportModal);
+        $('supportLater').addEventListener('click', closeSupportModal);
+        $('supportOverlay').addEventListener('click', (e) => {
+            if (e.target === $('supportOverlay')) closeSupportModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !$('supportOverlay').hidden) closeSupportModal();
+        });
+        $('shareCopyBtn').addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(APP_URL);
+            } catch (e) {
+                $('shareCopyInput').select();
+                document.execCommand('copy');
+            }
+            toast(t('shareCopied'), 'success');
+        });
     };
 
     // ------------------------------------------------------------- actions
@@ -910,6 +966,7 @@
         initZoom();
         initDeletion();
         initActions();
+        initSupportModal();
         restoreAssets();
 
         StampDesigner.init();

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://bros-ai.github.io/SignPDF/sitemap.xml

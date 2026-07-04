@@ -42,6 +42,8 @@ Everything is processed locally with `pdf.js`, `fabric.js` and `pdf-lib`. Your f
 - English / French interface (auto-detected, switchable)
 - Pinned CDN dependencies with SRI integrity hashes
 - Accessible: keyboard focus states, ARIA roles, reduced-motion support
+- SEO-ready: Open Graph/Twitter cards, JSON-LD, sitemap & robots.txt
+- Share & support modal — ⭐ [star the repo](https://github.com/Bros-AI/SignPDF), follow [Bros AI](https://bros.ai) on [X](https://x.com/GauthierBros) / [LinkedIn](https://www.linkedin.com/in/gauthier-bros/)
 
 ## Quick start
 

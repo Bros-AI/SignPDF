@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.0 — 2026-07-04
+
+### Added
+- **Support & share modal**: shown once per session after a successful export (never blocks the download) and openable anytime from the footer — star/contribute on GitHub, follow on X/LinkedIn, share to X/LinkedIn/Reddit/Email, copy-link button.
+- **Bros AI footer** with social links (bros.ai, GitHub, X, LinkedIn).
+- **SEO**: full meta description/keywords, canonical URL, Open Graph + Twitter cards with a generated `assets/og-image.png`, JSON-LD WebApplication structured data, `robots.txt` and `sitemap.xml`.
+
 ## 2.2.0 — 2026-07-04
 
 ### Added
