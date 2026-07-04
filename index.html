@@ -89,6 +89,21 @@
                             <div class="preview-container">
                                 <img id="signaturePreview" alt="Signature preview" />
                             </div>
+
+                            <div class="sig-editor" id="signatureEditor" hidden>
+                                <div class="sig-edit-frame">
+                                    <canvas id="signatureEditCanvas" aria-label="Signature transparency preview"></canvas>
+                                </div>
+                                <div class="sig-editor-controls">
+                                    <label class="range-label"><span data-i18n="bgRemoval">Background removal</span>
+                                        <input type="range" id="signatureBg" min="0" max="100" value="45">
+                                    </label>
+                                    <label class="range-label"><span data-i18n="inkBoost">Ink intensity</span>
+                                        <input type="range" id="signatureInk" min="0" max="100" value="0">
+                                    </label>
+                                    <button class="action-btn" id="signatureEditReset" type="button" data-i18n="resetOriginal">Reset</button>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="signature-pad-container" id="drawContainer" hidden>
@@ -132,6 +147,21 @@
                             </div>
                             <div class="preview-container">
                                 <img id="parafPreview" alt="Initials preview" />
+                            </div>
+
+                            <div class="sig-editor" id="parafEditor" hidden>
+                                <div class="sig-edit-frame">
+                                    <canvas id="parafEditCanvas" aria-label="Initials transparency preview"></canvas>
+                                </div>
+                                <div class="sig-editor-controls">
+                                    <label class="range-label"><span data-i18n="bgRemoval">Background removal</span>
+                                        <input type="range" id="parafBg" min="0" max="100" value="45">
+                                    </label>
+                                    <label class="range-label"><span data-i18n="inkBoost">Ink intensity</span>
+                                        <input type="range" id="parafInk" min="0" max="100" value="0">
+                                    </label>
+                                    <button class="action-btn" id="parafEditReset" type="button" data-i18n="resetOriginal">Reset</button>
+                                </div>
                             </div>
                         </div>
 

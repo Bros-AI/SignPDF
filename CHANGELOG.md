@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0 — 2026-07-04
+
+### Added
+- **Upload editor with background removal**: uploaded signature/initials scans open in an editor with a transparency-checkerboard preview and two gauges — *Background removal* (soft-edged luminance cutoff that makes the paper transparent) and *Ink intensity* (alpha boost + darkening for faint pens) — plus a Reset button. The original image and gauge settings are persisted, so the edit can be adjusted after a reload.
+
 ## 2.1.0 — 2026-07-04
 
 ### Added

@@ -240,12 +240,14 @@
 
         $('saveSignature').addEventListener('click', () => {
             if (signaturePad.isEmpty()) return toast(t('msgDrawFirst'), 'error');
+            closeEditor('signature');
             setAsset('signature', signaturePad.trimmedDataURL());
             switchToUpload('signature');
             toast(t('msgSignatureSaved'), 'success');
         });
         $('saveParaf').addEventListener('click', () => {
             if (parafPad.isEmpty()) return toast(t('msgDrawInitialsFirst'), 'error');
+            closeEditor('paraf');
             setAsset('paraf', parafPad.trimmedDataURL());
             switchToUpload('paraf');
             toast(t('msgInitialsSaved'), 'success');
@@ -284,25 +286,117 @@
 
     // -------------------------------------------------------------- assets
 
-    const setAsset = (kind, dataURL) => {
-        if (kind === 'signature') {
-            state.signatureImage = dataURL;
-            $('signaturePreview').src = dataURL;
-            $('signaturePreview').classList.add('visible');
-        } else {
-            state.parafImage = dataURL;
-            $('parafPreview').src = dataURL;
-            $('parafPreview').classList.add('visible');
-        }
+    const setAsset = (kind, dataURL, showImgPreview = true) => {
+        if (kind === 'signature') state.signatureImage = dataURL;
+        else state.parafImage = dataURL;
+        const img = $(kind === 'signature' ? 'signaturePreview' : 'parafPreview');
+        img.src = dataURL;
+        img.classList.toggle('visible', showImgPreview);
         try { localStorage.setItem('signpdf.' + kind, dataURL); } catch (e) { /* quota */ }
+    };
+
+    // --------------------------------------------- upload editor (bg removal)
+
+    // Uploaded scans/photos usually sit on a white background. The editor
+    // shows the image on a transparency checkerboard with two gauges:
+    // background removal (luminance cutoff with a soft alpha ramp, so edges
+    // stay smooth) and ink intensity (alpha boost + darkening for faint pens).
+    const editors = { signature: { orig: null }, paraf: { orig: null } };
+
+    const processScan = async (orig, bg, ink) => {
+        const el = await loadImageEl(orig);
+        const c = document.createElement('canvas');
+        c.width = el.naturalWidth;
+        c.height = el.naturalHeight;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(el, 0, 0);
+        if (bg > 0 || ink > 0) {
+            const id = ctx.getImageData(0, 0, c.width, c.height);
+            const d = id.data;
+            const cutoff = 255 - bg * 1.7;   // higher gauge -> lower cutoff -> more removed
+            const soft = 42;                 // alpha ramp width below the cutoff
+            const boost = ink / 100;
+            for (let i = 0; i < d.length; i += 4) {
+                const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+                let a = d[i + 3];
+                if (bg > 0) {
+                    a *= lum >= cutoff ? 0 : Math.min(1, (cutoff - lum) / soft);
+                }
+                if (boost > 0 && a > 0) {
+                    a = Math.min(255, a * (1 + boost * 1.6));
+                    d[i] *= 1 - boost * 0.35;
+                    d[i + 1] *= 1 - boost * 0.35;
+                    d[i + 2] *= 1 - boost * 0.35;
+                }
+                d[i + 3] = a;
+            }
+            ctx.putImageData(id, 0, 0);
+        }
+        return c.toDataURL('image/png');
+    };
+
+    const editorRefresh = async (kind) => {
+        const ed = editors[kind];
+        if (!ed.orig) return;
+        const bg = Number($(kind + 'Bg').value);
+        const ink = Number($(kind + 'Ink').value);
+        const processed = await processScan(ed.orig, bg, ink);
+        setAsset(kind, processed, false);
+        try { localStorage.setItem('signpdf.' + kind + '.edit', JSON.stringify({ bg, ink })); } catch (e) { /* quota */ }
+        const canvas = $(kind + 'EditCanvas');
+        const el = await loadImageEl(processed);
+        canvas.width = el.naturalWidth;
+        canvas.height = el.naturalHeight;
+        canvas.getContext('2d').drawImage(el, 0, 0);
+    };
+
+    const openEditor = async (kind, orig, bg, ink) => {
+        editors[kind].orig = orig;
+        try { localStorage.setItem('signpdf.' + kind + '.orig', orig); } catch (e) { /* quota */ }
+        if (bg !== undefined) $(kind + 'Bg').value = bg;
+        if (ink !== undefined) $(kind + 'Ink').value = ink;
+        $(kind + 'Editor').hidden = false;
+        $(kind === 'signature' ? 'signaturePreview' : 'parafPreview').classList.remove('visible');
+        await editorRefresh(kind);
+    };
+
+    // A drawn signature replaces the uploaded one — drop the editor state.
+    const closeEditor = (kind) => {
+        editors[kind].orig = null;
+        $(kind + 'Editor').hidden = true;
+        try {
+            localStorage.removeItem('signpdf.' + kind + '.orig');
+            localStorage.removeItem('signpdf.' + kind + '.edit');
+        } catch (e) { /* blocked storage */ }
+    };
+
+    const initSigEditors = () => {
+        ['signature', 'paraf'].forEach(kind => {
+            let timer = null;
+            const onInput = () => { clearTimeout(timer); timer = setTimeout(() => editorRefresh(kind), 90); };
+            $(kind + 'Bg').addEventListener('input', onInput);
+            $(kind + 'Ink').addEventListener('input', onInput);
+            $(kind + 'EditReset').addEventListener('click', () => {
+                $(kind + 'Bg').value = 0;
+                $(kind + 'Ink').value = 0;
+                editorRefresh(kind);
+            });
+        });
     };
 
     const restoreAssets = () => {
         try {
-            const sig = localStorage.getItem('signpdf.signature');
-            const par = localStorage.getItem('signpdf.paraf');
-            if (sig) { state.signatureImage = sig; $('signaturePreview').src = sig; $('signaturePreview').classList.add('visible'); }
-            if (par) { state.parafImage = par; $('parafPreview').src = par; $('parafPreview').classList.add('visible'); }
+            ['signature', 'paraf'].forEach(kind => {
+                const orig = localStorage.getItem('signpdf.' + kind + '.orig');
+                const processed = localStorage.getItem('signpdf.' + kind);
+                if (orig) {
+                    let cfg = { bg: 45, ink: 0 };
+                    try { cfg = JSON.parse(localStorage.getItem('signpdf.' + kind + '.edit')) || cfg; } catch (e) { /* corrupt */ }
+                    openEditor(kind, orig, cfg.bg, cfg.ink);
+                } else if (processed) {
+                    setAsset(kind, processed);
+                }
+            });
         } catch (e) { /* blocked storage */ }
     };
 
@@ -310,8 +404,8 @@
         if (!file.type.startsWith('image/')) return toast(t('msgImageOnly'), 'error');
         if (file.size > MAX_IMAGE_BYTES) return toast(t('msgFileTooBig'), 'error');
         const reader = new FileReader();
-        reader.onload = (e) => {
-            setAsset(kind, e.target.result);
+        reader.onload = async (e) => {
+            await openEditor(kind, e.target.result, Number($(kind + 'Bg').value), Number($(kind + 'Ink').value));
             toast(t(successMsg), 'success');
         };
         reader.readAsDataURL(file);
@@ -812,6 +906,7 @@
         initTabs();
         initPads();
         initUploads();
+        initSigEditors();
         initZoom();
         initDeletion();
         initActions();

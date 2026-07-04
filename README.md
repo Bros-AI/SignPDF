@@ -16,6 +16,7 @@ Everything is processed locally with `pdf.js`, `fabric.js` and `pdf-lib`. Your f
 
 ### ✍️ Signatures & initials
 - Draw with a smooth, pressure-friendly pad (pen color & width, HiDPI-sharp) or upload an image
+- **Background removal gauge** for uploaded scans/photos: slide to make the paper transparent (soft-edged luminance cutoff), boost faint ink, preview on a transparency checkerboard, reset anytime
 - Automatic cropping of drawn signatures to their ink bounding box
 - One-click "initial every page"
 - Optional date/time (and opt-in IP address) caption under each signature
