@@ -1,1447 +1,831 @@
-// DOM Elements
-const uploadOption = document.getElementById('uploadOption');
-const drawOption = document.getElementById('drawOption');
-const uploadContainer = document.getElementById('uploadContainer');
-const drawContainer = document.getElementById('drawContainer');
-const signatureDropzone = document.getElementById('signatureDropzone');
-const signatureUpload = document.getElementById('signatureUpload');
-const browseSignature = document.getElementById('browseSignature');
-const signaturePreview = document.getElementById('signaturePreview');
+// SignPDF v2 — main application.
+//
+// Architecture notes:
+// - All placements (signatures, initials, stamps) are stored in PDF *points*
+//   (scale-1 viewport units, y-down from the top-left of the page). The fabric
+//   canvas only ever shows them multiplied by the current zoom, so zooming and
+//   exporting are lossless.
+// - Export embeds each PNG individually at its true resolution with pdf-lib
+//   (no page flattening), so the output stays crisp and the original PDF
+//   content is untouched.
 
-const uploadParafOption = document.getElementById('uploadParafOption');
-const drawParafOption = document.getElementById('drawParafOption');
-const uploadParafContainer = document.getElementById('uploadParafContainer');
-const drawParafContainer = document.getElementById('drawParafContainer');
-const parafDropzone = document.getElementById('parafDropzone');
-const parafUpload = document.getElementById('parafUpload');
-const browseParaf = document.getElementById('browseParaf');
-const parafPreview = document.getElementById('parafPreview');
+(function () {
+    'use strict';
 
-const documentDropzone = document.getElementById('documentDropzone');
-const documentUpload = document.getElementById('documentUpload');
-const browseDocument = document.getElementById('browseDocument');
-const documentPreview = document.getElementById('documentPreview');
-const documentLoading = document.getElementById('documentLoading');
-const pdfCanvas = document.getElementById('pdfCanvas');
-const currentPageElement = document.getElementById('currentPage');
-const totalPagesElement = document.getElementById('totalPages');
-const pagination = document.getElementById('pagination');
-const addSignatureBtn = document.getElementById('addSignature');
-const addBottomSignatureBtn = document.getElementById('addBottomSignature');
-const addParafBtn = document.getElementById('addParaf');
-const addAllParafBtn = document.getElementById('addAllParaf');
-const saveDocumentBtn = document.getElementById('saveDocument');
-const clearSignatureBtn = document.getElementById('clearSignature');
-const saveSignatureBtn = document.getElementById('saveSignature');
-const clearParafBtn = document.getElementById('clearParaf');
-const saveParafBtn = document.getElementById('saveParaf');
-const progressBar = document.getElementById('progressBar');
-const progress = document.getElementById('progress');
-const successAlert = document.getElementById('successAlert');
-const errorAlert = document.getElementById('errorAlert');
+    const t = (key, vars) => window.I18N.t(key, vars);
 
-// Tabs
-const signatureTabs = document.querySelectorAll('.signature-tab');
-const signatureTabContents = document.querySelectorAll('.signature-tab-content');
+    // ------------------------------------------------------------ constants
 
-// App state
-let signatureImage = null;
-let parafImage = null;
-let pdfDocument = null;
-let currentPdfFile = null; // Store the original PDF file
-let pdfPages = [];
-let currentPage = 1;
-let totalPages = 0;
-let signatureCanvas = null;
-let parafCanvas = null;
-let fabricCanvas = null;
-let signatures = {};
-let userIPAddress = '0.0.0.0'; // Default IP address
-let signatureDate = new Date();
+    const ZOOMS = [0.75, 1, 1.25, 1.5, 2, 2.5];
+    const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+    const MAX_PDF_BYTES = 60 * 1024 * 1024;
+    const TARGET_HEIGHTS_PT = { signature: 60, paraf: 32, stampRound: 115, stampOval: 95, stampRect: 85 };
+    const SELECTION_STYLE = { cornerColor: '#4361ee', cornerSize: 10, transparentCorners: false, borderColor: '#4361ee' };
 
-// Get user IP address
-const getUserIPAddress = async () => {
-    try {
-        const response = await fetch('https://api.ipify.org?format=json');
-        const data = await response.json();
-        userIPAddress = data.ip;
-    } catch (error) {
-        console.warn('Could not fetch IP address', error);
-        userIPAddress = 'Unknown';
-    }
-};
+    // ---------------------------------------------------------------- state
 
-// Initialize the app
-const initApp = async () => {
-    // Attempt to get the user's IP address
-    await getUserIPAddress();
-    
-    // Initialize tabs functionality
-    signatureTabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            const tabId = tab.getAttribute('data-tab');
-            
-            // Remove active class from all tabs and contents
-            signatureTabs.forEach(t => t.classList.remove('active'));
-            signatureTabContents.forEach(c => c.classList.remove('active'));
-            
-            // Add active class to current tab and content
-            tab.classList.add('active');
-            document.getElementById(`${tabId}-tab`).classList.add('active');
-        });
-    });
-    
-    // Initialize signature and paraf pads
-    initSignaturePad();
-    initParafPad();
-    initPdfRenderer();
-};
+    const state = {
+        signatureImage: null,
+        parafImage: null,
+        stampImage: null,
+        stampCfg: null,
 
-// Initialize signature pad
-const initSignaturePad = () => {
-    signatureCanvas = document.getElementById('signaturePad');
-    const ctx = signatureCanvas.getContext('2d');
-    
-    // Function to resize canvas properly
-    const resizeSignatureCanvas = () => {
-        // Get the display width and height
-        const width = signatureCanvas.clientWidth;
-        const height = signatureCanvas.clientHeight;
-        
-        // If the canvas is not the same size
-        if (signatureCanvas.width !== width || signatureCanvas.height !== height) {
-            // Make the canvas the same size
-            signatureCanvas.width = width;
-            signatureCanvas.height = height;
-            
-            // Reset line style after resize
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-        }
+        pdfDocument: null,
+        pdfBytes: null,          // pristine copy for pdf-lib
+        pdfFileName: 'document',
+        totalPages: 0,
+        currentPage: 1,
+        zoomIndex: 3,            // ZOOMS[3] === 1.5
+        baseDims: {},            // pageNum -> {width, height} at scale 1 (PDF points)
+
+        placements: {},          // pageNum -> [placement]
+        fabricCanvas: null,
+        ipAddress: null,
+        rngSeed: 987654321
     };
-    
-    // Initial resize
-    resizeSignatureCanvas();
-    
-    let isDrawing = false;
-    let lastX = 0;
-    let lastY = 0;
-    
-    const startDrawing = (e) => {
-        isDrawing = true;
-        const { offsetX, offsetY } = getCoordinates(e);
-        lastX = offsetX;
-        lastY = offsetY;
-        
-        // Start a new path for better line quality
-        ctx.beginPath();
-        ctx.moveTo(lastX, lastY);
-        ctx.lineTo(lastX, lastY); // Draw a dot
-        ctx.stroke();
-    };
-    
-    const draw = (e) => {
-        if (!isDrawing) return;
-        e.preventDefault(); // Prevent scrolling on touch devices
-        
-        const { offsetX, offsetY } = getCoordinates(e);
-        
-        ctx.beginPath();
-        ctx.moveTo(lastX, lastY);
-        ctx.lineTo(offsetX, offsetY);
-        ctx.stroke();
-        
-        lastX = offsetX;
-        lastY = offsetY;
-    };
-    
-    const stopDrawing = () => {
-        isDrawing = false;
-    };
-    
-    const getCoordinates = (event) => {
-        if (event.touches && event.touches[0]) {
-            const rect = signatureCanvas.getBoundingClientRect();
-            return {
-                offsetX: event.touches[0].clientX - rect.left,
-                offsetY: event.touches[0].clientY - rect.top
-            };
-        } else if (event.offsetX !== undefined && event.offsetY !== undefined) {
-            return {
-                offsetX: event.offsetX,
-                offsetY: event.offsetY
-            };
-        } else {
-            // Fallback for other events
-            const rect = signatureCanvas.getBoundingClientRect();
-            return {
-                offsetX: event.clientX - rect.left,
-                offsetY: event.clientY - rect.top
-            };
-        }
-    };
-    
-    // Remove any existing event listeners to prevent duplicates
-    signatureCanvas.removeEventListener('mousedown', startDrawing);
-    signatureCanvas.removeEventListener('mousemove', draw);
-    signatureCanvas.removeEventListener('mouseup', stopDrawing);
-    signatureCanvas.removeEventListener('mouseout', stopDrawing);
-    
-    // Mouse events
-    signatureCanvas.addEventListener('mousedown', startDrawing);
-    signatureCanvas.addEventListener('mousemove', draw);
-    signatureCanvas.addEventListener('mouseup', stopDrawing);
-    signatureCanvas.addEventListener('mouseout', stopDrawing);
-    
-    // Touch events
-    signatureCanvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        startDrawing(e);
-    });
-    
-    signatureCanvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        draw(e);
-    });
-    
-    signatureCanvas.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        stopDrawing();
-    });
-    
-    // Clear signature
-    clearSignatureBtn.addEventListener('click', () => {
-        ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
-    });
-    
-    // Save signature
-    saveSignatureBtn.addEventListener('click', () => {
-        // Check if canvas is empty
-        const pixelData = ctx.getImageData(0, 0, signatureCanvas.width, signatureCanvas.height).data;
-        const isEmpty = !pixelData.some(channel => channel !== 0);
-        
-        if (isEmpty) {
-            showAlert('Please draw a signature first', 'error');
-            return;
-        }
-        
-        const dataUrl = signatureCanvas.toDataURL('image/png');
-        signatureImage = dataUrl;
-        signaturePreview.src = dataUrl;
-        signaturePreview.style.display = 'inline-block';
-        
-        // Switch back to upload option view
-        uploadOption.classList.add('active');
-        drawOption.classList.remove('active');
-        uploadContainer.style.display = 'block';
-        drawContainer.style.display = 'none';
-        
-        showAlert('Signature saved successfully!', 'success');
-    });
-};
 
-// Initialize paraf pad
-const initParafPad = () => {
-    parafCanvas = document.getElementById('parafPad');
-    const ctx = parafCanvas.getContext('2d');
-    
-    // Function to resize canvas properly
-    const resizeParafCanvas = () => {
-        // Get the display width and height
-        const width = parafCanvas.clientWidth;
-        const height = parafCanvas.clientHeight;
-        
-        // If the canvas is not the same size
-        if (parafCanvas.width !== width || parafCanvas.height !== height) {
-            // Make the canvas the same size
-            parafCanvas.width = width;
-            parafCanvas.height = height;
-            
-            // Reset line style after resize
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 2;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-        }
-    };
-    
-    // Initial resize
-    resizeParafCanvas();
-    
-    let isDrawing = false;
-    let lastX = 0;
-    let lastY = 0;
-    
-    const startDrawing = (e) => {
-        isDrawing = true;
-        const { offsetX, offsetY } = getCoordinates(e);
-        lastX = offsetX;
-        lastY = offsetY;
-        
-        // Start a new path for better line quality
-        ctx.beginPath();
-        ctx.moveTo(lastX, lastY);
-        ctx.lineTo(lastX, lastY); // Draw a dot
-        ctx.stroke();
-    };
-    
-    const draw = (e) => {
-        if (!isDrawing) return;
-        e.preventDefault(); // Prevent scrolling on touch devices
-        
-        const { offsetX, offsetY } = getCoordinates(e);
-        
-        ctx.beginPath();
-        ctx.moveTo(lastX, lastY);
-        ctx.lineTo(offsetX, offsetY);
-        ctx.stroke();
-        
-        lastX = offsetX;
-        lastY = offsetY;
-    };
-    
-    const stopDrawing = () => {
-        isDrawing = false;
-    };
-    
-    const getCoordinates = (event) => {
-        if (event.touches && event.touches[0]) {
-            const rect = parafCanvas.getBoundingClientRect();
-            return {
-                offsetX: event.touches[0].clientX - rect.left,
-                offsetY: event.touches[0].clientY - rect.top
-            };
-        } else if (event.offsetX !== undefined && event.offsetY !== undefined) {
-            return {
-                offsetX: event.offsetX,
-                offsetY: event.offsetY
-            };
-        } else {
-            // Fallback for other events
-            const rect = parafCanvas.getBoundingClientRect();
-            return {
-                offsetX: event.clientX - rect.left,
-                offsetY: event.clientY - rect.top
-            };
-        }
-    };
-    
-    // Remove any existing event listeners to prevent duplicates
-    parafCanvas.removeEventListener('mousedown', startDrawing);
-    parafCanvas.removeEventListener('mousemove', draw);
-    parafCanvas.removeEventListener('mouseup', stopDrawing);
-    parafCanvas.removeEventListener('mouseout', stopDrawing);
-    
-    // Mouse events
-    parafCanvas.addEventListener('mousedown', startDrawing);
-    parafCanvas.addEventListener('mousemove', draw);
-    parafCanvas.addEventListener('mouseup', stopDrawing);
-    parafCanvas.addEventListener('mouseout', stopDrawing);
-    
-    // Touch events
-    parafCanvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        startDrawing(e);
-    });
-    
-    parafCanvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        draw(e);
-    });
-    
-    parafCanvas.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        stopDrawing();
-    });
-    
-    // Clear paraf
-    clearParafBtn.addEventListener('click', () => {
-        ctx.clearRect(0, 0, parafCanvas.width, parafCanvas.height);
-    });
-    
-    // Save paraf
-    saveParafBtn.addEventListener('click', () => {
-        // Check if canvas is empty
-        const pixelData = ctx.getImageData(0, 0, parafCanvas.width, parafCanvas.height).data;
-        const isEmpty = !pixelData.some(channel => channel !== 0);
-        
-        if (isEmpty) {
-            showAlert('Please draw your initials first', 'error');
-            return;
-        }
-        
-        const dataUrl = parafCanvas.toDataURL('image/png');
-        parafImage = dataUrl;
-        parafPreview.src = dataUrl;
-        parafPreview.style.display = 'inline-block';
-        
-        // Switch back to upload option view
-        uploadParafOption.classList.add('active');
-        drawParafOption.classList.remove('active');
-        uploadParafContainer.style.display = 'block';
-        drawParafContainer.style.display = 'none';
-        
-        showAlert('Initials saved successfully!', 'success');
-    });
-};
+    const Z = () => ZOOMS[state.zoomIndex];
 
-// Initialize PDF renderer
-const initPdfRenderer = () => {
-    // Ensure the PDF canvas is initially empty
-    if (fabricCanvas) {
-        fabricCanvas.dispose();
-    }
-    
-    // Initialize fabric.js canvas with default settings
-    fabricCanvas = new fabric.Canvas(pdfCanvas, {
-        selection: false,
-        renderOnAddRemove: true,
-        stateful: true
-    });
-    
-    // Add event listeners
-    addSignatureBtn.addEventListener('click', () => addSignatureToPage('center'));
-    addBottomSignatureBtn.addEventListener('click', () => addSignatureToPage('bottom'));
-    addParafBtn.addEventListener('click', () => addParafToPage('corner'));
-    addAllParafBtn.addEventListener('click', addParafToAllPages);
-    saveDocumentBtn.addEventListener('click', saveSignedDocument);
-    
-    // Resize handler
-    window.addEventListener('resize', resizeCanvas);
-};
+    const rng = () => {
+        state.rngSeed = (state.rngSeed * 1103515245 + 12345) % 2147483648;
+        return state.rngSeed / 2147483648;
+    };
 
-// Load PDF document
-const loadPdfDocument = async (file) => {
-    documentLoading.style.display = 'flex';
-    documentPreview.style.display = 'none';
-    
-    try {
-        // Store the file for later use
-        currentPdfFile = file;
-        
-        // Read the file as an ArrayBuffer
-        const fileReader = new FileReader();
-        
-        const arrayBufferPromise = new Promise((resolve, reject) => {
-            fileReader.onload = () => resolve(fileReader.result);
-            fileReader.onerror = reject;
-        });
-        
-        fileReader.readAsArrayBuffer(file);
-        const arrayBuffer = await arrayBufferPromise;
-        
-        // Load PDF with PDF.js
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        
-        pdfDocument = pdf;
-        totalPages = pdf.numPages;
-        totalPagesElement.textContent = totalPages;
-        
-        // Initialize pages array
-        pdfPages = new Array(totalPages).fill(null);
-        signatures = {};
-        
-        // Create pagination
-        createPagination();
-        
-        // Render first page
-        await renderPage(1);
-        
-        documentPreview.style.display = 'flex';
-        documentLoading.style.display = 'none';
-        
-        showAlert('Document loaded successfully!', 'success');
-    } catch (error) {
-        console.error('Error loading PDF:', error);
-        documentLoading.style.display = 'none';
-        showAlert('Error loading PDF: ' + error.message, 'error');
-    }
-};
+    const $ = (id) => document.getElementById(id);
 
-// Create pagination buttons
-const createPagination = () => {
-    pagination.innerHTML = '';
-    
-    // Add previous button
-    const prevButton = document.createElement('button');
-    prevButton.className = 'page-btn';
-    prevButton.innerHTML = '&laquo;';
-    prevButton.disabled = currentPage === 1;
-    prevButton.addEventListener('click', () => {
-        if (currentPage > 1) {
-            renderPage(currentPage - 1);
-        }
-    });
-    pagination.appendChild(prevButton);
-    
-    // Add page buttons
-    let maxButtons = 5;
-    let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
-    let endPage = Math.min(totalPages, startPage + maxButtons - 1);
-    
-    if (endPage - startPage + 1 < maxButtons) {
-        startPage = Math.max(1, endPage - maxButtons + 1);
-    }
-    
-    for (let i = startPage; i <= endPage; i++) {
-        const pageButton = document.createElement('button');
-        pageButton.className = 'page-btn';
-        pageButton.textContent = i;
-        
-        if (i === currentPage) {
-            pageButton.classList.add('active');
-        }
-        
-        pageButton.addEventListener('click', () => {
-            renderPage(i);
-        });
-        
-        pagination.appendChild(pageButton);
-    }
-    
-    // Add next button
-    const nextButton = document.createElement('button');
-    nextButton.className = 'page-btn';
-    nextButton.innerHTML = '&raquo;';
-    nextButton.disabled = currentPage === totalPages;
-    nextButton.addEventListener('click', () => {
-        if (currentPage < totalPages) {
-            renderPage(currentPage + 1);
-        }
-    });
-    pagination.appendChild(nextButton);
-};
+    // ---------------------------------------------------------------- toast
 
-// Render PDF page
-const renderPage = async (pageNumber) => {
-    if (pageNumber < 1 || pageNumber > totalPages) return;
-    
-    try {
-        currentPage = pageNumber;
-        currentPageElement.textContent = currentPage;
-        
-        // Update pagination
-        createPagination();
-        
-        // Check if we already have this page cached
-        if (!pdfPages[pageNumber - 1]) {
-            // Get page from the PDF document
-            const page = await pdfDocument.getPage(pageNumber);
-            
-            // Get viewport (scale 1.5 for better quality)
-            const viewport = page.getViewport({ scale: 1.5 });
-            
-            // Store the page in memory
-            pdfPages[pageNumber - 1] = {
-                page,
-                viewport
-            };
-        }
-        
-        const { page, viewport } = pdfPages[pageNumber - 1];
-        
-        // Create a temporary canvas for PDF rendering
-        const tempCanvas = document.createElement('canvas');
-        const tempContext = tempCanvas.getContext('2d');
-        
-        // Set the canvas dimensions to match the viewport
-        tempCanvas.width = viewport.width;
-        tempCanvas.height = viewport.height;
-        
-        // Render PDF to the temporary canvas
-        const renderContext = {
-            canvasContext: tempContext,
-            viewport: viewport
-        };
-        
-        await page.render(renderContext).promise;
-        
-        // Initialize fabric canvas with the correct dimensions
-        if (fabricCanvas) {
-            fabricCanvas.dispose();
-        }
-        
-        // Set PDF canvas dimensions
-        pdfCanvas.width = viewport.width;
-        pdfCanvas.height = viewport.height;
-        
-        // Create new fabric canvas
-        fabricCanvas = new fabric.Canvas(pdfCanvas, {
-            selection: true,
-            renderOnAddRemove: true,
-            width: viewport.width,
-            height: viewport.height
-        });
-        
-        // Create background image from the rendered PDF
-        fabric.Image.fromURL(tempCanvas.toDataURL('image/png'), img => {
-            img.set({
-                left: 0,
-                top: 0,
-                selectable: false,
-                evented: false
+    const toast = (message, type = 'info') => {
+        const stack = $('toastStack');
+        const el = document.createElement('div');
+        el.className = `toast toast-${type}`;
+        el.textContent = message;
+        stack.appendChild(el);
+        setTimeout(() => el.classList.add('toast-out'), 2800);
+        setTimeout(() => el.remove(), 3300);
+    };
+
+    // ------------------------------------------------------- theme & lang
+
+    const initChrome = () => {
+        const savedTheme = localStorage.getItem('signpdf.theme')
+            || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        setTheme(savedTheme);
+        $('themeToggle').addEventListener('click', () =>
+            setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+        $('langToggle').addEventListener('click', () =>
+            I18N.setLang(I18N.lang === 'fr' ? 'en' : 'fr'));
+        I18N.apply();
+    };
+
+    const setTheme = (theme) => {
+        document.documentElement.dataset.theme = theme;
+        localStorage.setItem('signpdf.theme', theme);
+        $('themeToggle').textContent = theme === 'dark' ? '☀️' : '🌙';
+    };
+
+    // ---------------------------------------------------------------- tabs
+
+    const initTabs = () => {
+        const tabs = document.querySelectorAll('.signature-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(x => {
+                    x.classList.toggle('active', x === tab);
+                    x.setAttribute('aria-selected', x === tab ? 'true' : 'false');
+                });
+                document.querySelectorAll('.signature-tab-content').forEach(panel => {
+                    const isActive = panel.id === tab.dataset.tab + '-tab';
+                    panel.classList.toggle('active', isActive);
+                    panel.hidden = !isActive;
+                });
             });
-            
-            fabricCanvas.setBackgroundImage(img, fabricCanvas.renderAll.bind(fabricCanvas));
-            
-            // Load signatures for this page after background is set
-            loadSignaturesForPage(pageNumber);
         });
-        
-    } catch (error) {
-        console.error('Error rendering page:', error);
-        showAlert('Error rendering page: ' + error.message, 'error');
-    }
-};
-
-// Resize canvas on window resize
-const resizeCanvas = () => {
-    if (pdfPages[currentPage - 1]) {
-        // Rerender the current page to adjust the canvas size
-        renderPage(currentPage);
-    }
-};
-
-// Format date for display
-const formatDate = (date) => {
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-};
-
-// Create signature info
-const createSignatureInfo = () => {
-    const date = new Date();
-    signatureDate = date;
-    return {
-        date: formatDate(date),
-        ip: userIPAddress,
-        timestamp: date.getTime()
     };
-};
 
-// Add signature to current page
-const addSignatureToPage = (position = 'center') => {
-    if (!signatureImage) {
-        showAlert('Please add a signature first', 'error');
-        return;
-    }
-    
-    if (!pdfDocument) {
-        showAlert('Please upload a document first', 'error');
-        return;
-    }
-    
-    fabric.Image.fromURL(signatureImage, (img) => {
-        const signatureId = Date.now().toString();
-        const info = createSignatureInfo();
-        
-        // Set initial size and position
-        const maxHeight = 100;
-        const ratio = img.width / img.height;
-        const newHeight = Math.min(img.height, maxHeight);
-        const newWidth = newHeight * ratio;
-        
-        let left = 50;
-        let top = 50;
-        
-        // Position at bottom of the page if requested
-        if (position === 'bottom') {
-            left = fabricCanvas.width / 2 - (newWidth * img.scaleX) / 2;
-            top = fabricCanvas.height - 150; // Position near bottom
-        }
-        
-        img.set({
-            left: left,
-            top: top,
-            scaleX: newWidth / img.width,
-            scaleY: newHeight / img.height,
-            cornerColor: '#4361ee',
-            cornerSize: 12,
-            transparentCorners: false,
-            borderColor: '#4361ee',
-            signatureId: signatureId,
-            signatureType: 'full'
-        });
-        
-        // Add the signature info as text
-        const infoText = new fabric.Text(`Signed: ${info.date}\nIP: ${info.ip}`, {
-            left: left,
-            top: top + (newHeight * img.scaleY) + 5,
-            fontSize: 10,
-            fill: '#666666',
-            fontFamily: 'Arial',
-            signatureId: signatureId,
-            signatureType: 'info',
-            selectable: false
-        });
-        
-        fabricCanvas.add(img);
-        fabricCanvas.add(infoText);
-        fabricCanvas.setActiveObject(img);
-        
-        // Store signature data
-        if (!signatures[currentPage]) {
-            signatures[currentPage] = [];
-        }
-        
-        // Add event listener for object modification
-        img.on('modified', function() {
-            // Update the info text position when signature moves
-            const sigId = this.signatureId;
-            const infoObj = fabricCanvas.getObjects().find(o => 
-                o.signatureId === sigId && o.signatureType === 'info');
-            
-            if (infoObj) {
-                infoObj.set({
-                    left: this.left,
-                    top: this.top + (this.height * this.scaleY) + 5
-                });
-                fabricCanvas.renderAll();
-                
-                // Also update the stored position
-                const pageSignatures = signatures[currentPage] || [];
-                const signatureIndex = pageSignatures.findIndex(s => s.id === sigId);
-                
-                if (signatureIndex !== -1) {
-                    signatures[currentPage][signatureIndex].left = this.left;
-                    signatures[currentPage][signatureIndex].top = this.top;
-                    signatures[currentPage][signatureIndex].scaleX = this.scaleX;
-                    signatures[currentPage][signatureIndex].scaleY = this.scaleY;
-                    signatures[currentPage][signatureIndex].angle = this.angle;
-                    
-                    // Update info position
-                    const infoIndex = pageSignatures.findIndex(s => s.id === sigId && s.type === 'info');
-                    if (infoIndex !== -1) {
-                        signatures[currentPage][infoIndex].left = infoObj.left;
-                        signatures[currentPage][infoIndex].top = infoObj.top;
-                    }
-                }
+    // -------------------------------------------------------- drawing pads
+
+    // Smooth quadratic-curve pad with HiDPI support and content trimming.
+    const createPad = (canvas, getColor, getWidth) => {
+        const ctx = canvas.getContext('2d');
+        let drawing = false;
+        let points = [];
+        let hasInk = false;
+
+        const dpr = () => window.devicePixelRatio || 1;
+
+        const resize = () => {
+            const saved = hasInk ? canvas.toDataURL() : null;
+            canvas.width = canvas.clientWidth * dpr();
+            canvas.height = canvas.clientHeight * dpr();
+            ctx.setTransform(dpr(), 0, 0, dpr(), 0, 0);
+            if (saved) {
+                const img = new Image();
+                img.onload = () => ctx.drawImage(img, 0, 0, canvas.clientWidth, canvas.clientHeight);
+                img.src = saved;
             }
-        });
-        
-        signatures[currentPage].push({
-            id: signatureId,
-            type: 'full',
-            image: signatureImage,
-            left: img.left,
-            top: img.top,
-            scaleX: img.scaleX,
-            scaleY: img.scaleY,
-            angle: img.angle || 0,
-            info: info
-        });
-        
-        // Add info text object to signatures array
-        signatures[currentPage].push({
-            id: signatureId,
-            type: 'info',
-            text: `Signed: ${info.date}\nIP: ${info.ip}`,
-            left: infoText.left,
-            top: infoText.top,
-            fontSize: 10,
-            info: info
-        });
-        
-        showAlert('Signature added to page ' + currentPage, 'success');
-    });
-};
+        };
 
-// Add paraf (initials) to current page
-const addParafToPage = (position = 'corner') => {
-    if (!parafImage) {
-        showAlert('Please add your initials first', 'error');
-        return;
-    }
-    
-    if (!pdfDocument) {
-        showAlert('Please upload a document first', 'error');
-        return;
-    }
-    
-    fabric.Image.fromURL(parafImage, (img) => {
-        const parafId = Date.now().toString();
-        const info = createSignatureInfo();
-        
-        // Set initial size and position
-        const maxHeight = 50;
-        const ratio = img.width / img.height;
-        const newHeight = Math.min(img.height, maxHeight);
-        const newWidth = newHeight * ratio;
-        
-        let left = 50;
-        let top = 50;
-        
-        // Position at corner of the page if requested
-        if (position === 'corner') {
-            left = fabricCanvas.width - 100;
-            top = fabricCanvas.height - 80;
-        }
-        
-        img.set({
-            left: left,
-            top: top,
-            scaleX: newWidth / img.width,
-            scaleY: newHeight / img.height,
-            cornerColor: '#4361ee',
-            cornerSize: 10,
-            transparentCorners: false,
-            borderColor: '#4361ee',
-            signatureId: parafId,
-            signatureType: 'paraf'
-        });
-        
-        // Add the signature info as text (smaller for paraf)
-        const infoText = new fabric.Text(`${info.date.split(' ')[0]}`, {
-            left: left,
-            top: top + (newHeight * img.scaleY) + 5,
-            fontSize: 8,
-            fill: '#666666',
-            fontFamily: 'Arial',
-            signatureId: parafId,
-            signatureType: 'info',
-            selectable: false
-        });
-        
-        fabricCanvas.add(img);
-        fabricCanvas.add(infoText);
-        fabricCanvas.setActiveObject(img);
-        
-        // Store signature data
-        if (!signatures[currentPage]) {
-            signatures[currentPage] = [];
-        }
-        
-        // Add event listener for object modification
-        img.on('modified', function() {
-            // Update the info text position when paraf moves
-            const sigId = this.signatureId;
-            const infoObj = fabricCanvas.getObjects().find(o => 
-                o.signatureId === sigId && o.signatureType === 'info');
-            
-            if (infoObj) {
-                infoObj.set({
-                    left: this.left,
-                    top: this.top + (this.height * this.scaleY) + 5
-                });
-                fabricCanvas.renderAll();
-                
-                // Also update the stored position
-                const pageSignatures = signatures[currentPage] || [];
-                const signatureIndex = pageSignatures.findIndex(s => s.id === sigId);
-                
-                if (signatureIndex !== -1) {
-                    signatures[currentPage][signatureIndex].left = this.left;
-                    signatures[currentPage][signatureIndex].top = this.top;
-                    signatures[currentPage][signatureIndex].scaleX = this.scaleX;
-                    signatures[currentPage][signatureIndex].scaleY = this.scaleY;
-                    signatures[currentPage][signatureIndex].angle = this.angle;
-                    
-                    // Update info position
-                    const infoIndex = pageSignatures.findIndex(s => s.id === sigId && s.type === 'info');
-                    if (infoIndex !== -1) {
-                        signatures[currentPage][infoIndex].left = infoObj.left;
-                        signatures[currentPage][infoIndex].top = infoObj.top;
-                    }
-                }
+        const pos = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const src = e.touches ? e.touches[0] : e;
+            return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+        };
+
+        const stroke = () => {
+            ctx.strokeStyle = getColor();
+            ctx.lineWidth = getWidth();
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            if (points.length < 3) {
+                const p = points[0];
+                ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+                ctx.fillStyle = getColor();
+                ctx.fill();
+                return;
             }
-        });
-        
-        signatures[currentPage].push({
-            id: parafId,
-            type: 'paraf',
-            image: parafImage,
-            left: img.left,
-            top: img.top,
-            scaleX: img.scaleX,
-            scaleY: img.scaleY,
-            angle: img.angle || 0,
-            info: info
-        });
-        
-        // Add info text object to signatures array
-        signatures[currentPage].push({
-            id: parafId,
-            type: 'info',
-            text: `${info.date.split(' ')[0]}`,
-            left: infoText.left,
-            top: infoText.top,
-            fontSize: 8,
-            info: info
-        });
-        
-        showAlert('Initials added to page ' + currentPage, 'success');
-    });
-};
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length - 1; i++) {
+                const mid = { x: (points[i].x + points[i + 1].x) / 2, y: (points[i].y + points[i + 1].y) / 2 };
+                ctx.quadraticCurveTo(points[i].x, points[i].y, mid.x, mid.y);
+            }
+            ctx.stroke();
+        };
 
-// Add paraf to all pages
-const addParafToAllPages = async () => {
-    if (!parafImage) {
-        showAlert('Please add your initials first', 'error');
-        return;
-    }
-    
-    if (!pdfDocument) {
-        showAlert('Please upload a document first', 'error');
-        return;
-    }
-    
-    // Save current page to return to it later
-    const oldPage = currentPage;
-    
-    // Show loading
-    documentLoading.style.display = 'flex';
-    
-    try {
-        // Process each page
-        for (let i = 1; i <= totalPages; i++) {
-            // Update progress
-            await renderPage(i);
-            
-            // Add paraf to this page (in the corner)
-            addParafToPage('corner');
-            
-            // Small delay to allow rendering
-            await new Promise(resolve => setTimeout(resolve, 200));
-        }
-        
-        // Return to original page
-        await renderPage(oldPage);
-        
-        documentLoading.style.display = 'none';
-        showAlert(`Initials added to all ${totalPages} pages`, 'success');
-    } catch (error) {
-        console.error('Error adding initials to all pages:', error);
-        documentLoading.style.display = 'none';
-        showAlert('Error adding initials: ' + error.message, 'error');
-    }
-};
+        const start = (e) => {
+            e.preventDefault();
+            drawing = true;
+            hasInk = true;
+            points = [pos(e)];
+            stroke();
+        };
+        const move = (e) => {
+            if (!drawing) return;
+            e.preventDefault();
+            points.push(pos(e));
+            if (points.length > 4) points = points.slice(-4);
+            stroke();
+        };
+        const end = () => { drawing = false; points = []; };
 
-// Load signatures for specific page
-const loadSignaturesForPage = (pageNumber) => {
-    const pageSignatures = signatures[pageNumber] || [];
-    
-    pageSignatures.forEach(signature => {
-        if (signature.type === 'full' || signature.type === 'paraf') {
-            // Load image
-            fabric.Image.fromURL(signature.image, (img) => {
-                img.set({
-                    left: signature.left,
-                    top: signature.top,
-                    scaleX: signature.scaleX,
-                    scaleY: signature.scaleY,
-                    angle: signature.angle,
-                    cornerColor: '#4361ee',
-                    cornerSize: signature.type === 'paraf' ? 10 : 12,
-                    transparentCorners: false,
-                    borderColor: '#4361ee',
-                    signatureId: signature.id,
-                    signatureType: signature.type
-                });
-                
-                // Add event listener for object modification
-                img.on('modified', function() {
-                    // Update the info text position when signature moves
-                    const sigId = this.signatureId;
-                    const infoObj = fabricCanvas.getObjects().find(o => 
-                        o.signatureId === sigId && o.signatureType === 'info');
-                    
-                    if (infoObj) {
-                        infoObj.set({
-                            left: this.left,
-                            top: this.top + (this.height * this.scaleY) + 5
-                        });
-                        fabricCanvas.renderAll();
-                        
-                        // Update stored signature position
-                        const pageSignatures = signatures[currentPage] || [];
-                        const signatureIndex = pageSignatures.findIndex(s => s.id === sigId && (s.type === 'full' || s.type === 'paraf'));
-                        
-                        if (signatureIndex !== -1) {
-                            signatures[currentPage][signatureIndex].left = this.left;
-                            signatures[currentPage][signatureIndex].top = this.top;
-                            signatures[currentPage][signatureIndex].scaleX = this.scaleX;
-                            signatures[currentPage][signatureIndex].scaleY = this.scaleY;
-                            signatures[currentPage][signatureIndex].angle = this.angle;
-                            
-                            // Update info position
-                            const infoIndex = pageSignatures.findIndex(s => s.id === sigId && s.type === 'info');
-                            if (infoIndex !== -1) {
-                                signatures[currentPage][infoIndex].left = infoObj.left;
-                                signatures[currentPage][infoIndex].top = infoObj.top;
-                            }
+        canvas.addEventListener('mousedown', start);
+        canvas.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', end);
+        canvas.addEventListener('touchstart', start, { passive: false });
+        canvas.addEventListener('touchmove', move, { passive: false });
+        canvas.addEventListener('touchend', end);
+
+        return {
+            resize,
+            clear() {
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+                hasInk = false;
+            },
+            isEmpty() {
+                if (!hasInk) return true;
+                const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) return false;
+                return true;
+            },
+            // Crop to inked bounding box (+ padding) for tighter placement.
+            trimmedDataURL() {
+                const { width: W, height: H } = canvas;
+                const data = ctx.getImageData(0, 0, W, H).data;
+                let minX = W, minY = H, maxX = 0, maxY = 0;
+                for (let y = 0; y < H; y++) {
+                    for (let x = 0; x < W; x++) {
+                        if (data[(y * W + x) * 4 + 3] > 8) {
+                            if (x < minX) minX = x;
+                            if (x > maxX) maxX = x;
+                            if (y < minY) minY = y;
+                            if (y > maxY) maxY = y;
                         }
                     }
-                });
-                
-                fabricCanvas.add(img);
-            });
-        } else if (signature.type === 'info') {
-            // Add info text
-            const infoText = new fabric.Text(signature.text, {
-                left: signature.left,
-                top: signature.top,
-                fontSize: signature.fontSize || 10,
-                fill: '#666666',
-                fontFamily: 'Arial',
-                signatureId: signature.id,
-                signatureType: 'info',
-                selectable: false
-            });
-            
-            fabricCanvas.add(infoText);
-        }
-    });
-    
-    fabricCanvas.renderAll();
-};
+                }
+                if (maxX <= minX || maxY <= minY) return canvas.toDataURL('image/png');
+                const pad = 8;
+                minX = Math.max(0, minX - pad); minY = Math.max(0, minY - pad);
+                maxX = Math.min(W, maxX + pad); maxY = Math.min(H, maxY + pad);
+                const out = document.createElement('canvas');
+                out.width = maxX - minX;
+                out.height = maxY - minY;
+                out.getContext('2d').drawImage(canvas, minX, minY, out.width, out.height, 0, 0, out.width, out.height);
+                return out.toDataURL('image/png');
+            }
+        };
+    };
 
-// Save signed document
-const saveSignedDocument = async () => {
-    if (!pdfDocument || !Object.keys(signatures).length) {
-        showAlert('Please add at least one signature to the document', 'error');
-        return;
-    }
-    
-    progressBar.style.display = 'block';
-    progress.style.width = '0%';
-    
-    try {
-        // Get original PDF as ArrayBuffer
-        const fileReader = new FileReader();
-        const arrayBufferPromise = new Promise((resolve, reject) => {
-            fileReader.onload = () => resolve(fileReader.result);
-            fileReader.onerror = reject;
+    let signaturePad = null;
+    let parafPad = null;
+    let penColor = '#111827';
+
+    const initPads = () => {
+        signaturePad = createPad($('signaturePad'), () => penColor, () => Number($('penWidth').value));
+        parafPad = createPad($('parafPad'), () => penColor, () => 2.5);
+
+        document.querySelectorAll('#penColors .swatch').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#penColors .swatch').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                penColor = btn.dataset.color;
+            });
         });
-        
-        fileReader.readAsArrayBuffer(currentPdfFile);
-        const pdfBytes = await arrayBufferPromise;
-        
-        // Load PDF document with PDF-lib
-        const { PDFDocument } = PDFLib;
-        const pdfDoc = await PDFDocument.load(pdfBytes);
-        
-        // Create a temporary canvas for rendering signatures
-        const tempCanvas = document.createElement('canvas');
-        const tempContext = tempCanvas.getContext('2d');
-        
-        // Process each page with signatures
-        const signedPageNumbers = Object.keys(signatures).map(Number).sort((a, b) => a - b);
-        
-        for (let i = 0; i < signedPageNumbers.length; i++) {
-            const pageNum = signedPageNumbers[i];
-            
-            // Update progress
-            progress.style.width = `${((i + 1) / signedPageNumbers.length) * 100}%`;
-            
-            if (!pdfPages[pageNum - 1]) continue;
-            
-            const pageData = pdfPages[pageNum - 1];
-            const pageSignatures = signatures[pageNum] || [];
-            
-            if (pageSignatures.length === 0) continue;
-            
-            // Get the PDF page dimensions
-            const pdfPage = pdfDoc.getPage(pageNum - 1);
-            const { width: pdfWidth, height: pdfHeight } = pdfPage.getSize();
-            
-            // Set canvas dimensions to match PDF page size
-            tempCanvas.width = pdfWidth;
-            tempCanvas.height = pdfHeight;
-            
-            // Clear the canvas
-            tempContext.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-            
-            // Create a fabric canvas for signatures
-            const sigCanvas = new fabric.StaticCanvas(tempCanvas);
-            sigCanvas.clear();
-            
-            // Get only image signatures (not info text)
-            const imageSignatures = pageSignatures.filter(sig => sig.type === 'full' || sig.type === 'paraf');
-            const infoTexts = pageSignatures.filter(sig => sig.type === 'info');
-            
-            // Add each signature to the canvas
-            for (const signature of imageSignatures) {
-                await new Promise(resolve => {
-                    fabric.Image.fromURL(signature.image, (img) => {
-                        // Convert coordinates from fabric canvas viewport to PDF coordinates
-                        // This ensures signatures appear in exactly the same position in the PDF
-                        const pdfLeft = signature.left * (pdfWidth / pageData.viewport.width);
-                        const pdfTop = signature.top * (pdfHeight / pageData.viewport.height);
-                        const pdfScaleX = signature.scaleX * (pdfWidth / pageData.viewport.width);
-                        const pdfScaleY = signature.scaleY * (pdfHeight / pageData.viewport.height);
-                        
-                        img.set({
-                            left: pdfLeft,
-                            top: pdfTop,
-                            scaleX: pdfScaleX,
-                            scaleY: pdfScaleY,
-                            angle: signature.angle,
-                            originX: 'left',
-                            originY: 'top'
-                        });
-                        
-                        sigCanvas.add(img);
-                        resolve();
-                    });
-                });
-            }
-            
-            // Add each info text to the canvas
-            for (const info of infoTexts) {
-                const infoText = new fabric.Text(info.text, {
-                    left: info.left * (pdfWidth / pageData.viewport.width),
-                    top: info.top * (pdfHeight / pageData.viewport.height),
-                    fontSize: info.fontSize * (pdfWidth / pageData.viewport.width),
-                    fill: '#666666',
-                    fontFamily: 'Arial'
-                });
-                
-                sigCanvas.add(infoText);
-            }
-            
-            sigCanvas.renderAll();
-            
-            // Get the PNG image of the signatures
-            const signaturesPng = tempCanvas.toDataURL('image/png');
-            
-            // Embed the PNG in the PDF
-            const signaturesPngBytes = await fetch(signaturesPng).then(res => res.arrayBuffer());
-            const pngImage = await pdfDoc.embedPng(signaturesPngBytes);
-            
-            // Draw the signature layer on the PDF page
-            pdfPage.drawImage(pngImage, {
-                x: 0,
-                y: 0,
-                width: pdfWidth,
-                height: pdfHeight,
+
+        $('clearSignature').addEventListener('click', () => signaturePad.clear());
+        $('clearParaf').addEventListener('click', () => parafPad.clear());
+
+        $('saveSignature').addEventListener('click', () => {
+            if (signaturePad.isEmpty()) return toast(t('msgDrawFirst'), 'error');
+            setAsset('signature', signaturePad.trimmedDataURL());
+            switchToUpload('signature');
+            toast(t('msgSignatureSaved'), 'success');
+        });
+        $('saveParaf').addEventListener('click', () => {
+            if (parafPad.isEmpty()) return toast(t('msgDrawInitialsFirst'), 'error');
+            setAsset('paraf', parafPad.trimmedDataURL());
+            switchToUpload('paraf');
+            toast(t('msgInitialsSaved'), 'success');
+        });
+
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if (!$('drawContainer').hidden) signaturePad.resize();
+                if (!$('drawParafContainer').hidden) parafPad.resize();
+            }, 150);
+        });
+    };
+
+    const switchToUpload = (kind) => {
+        const map = kind === 'signature'
+            ? { up: 'uploadOption', draw: 'drawOption', upC: 'uploadContainer', drawC: 'drawContainer' }
+            : { up: 'uploadParafOption', draw: 'drawParafOption', upC: 'uploadParafContainer', drawC: 'drawParafContainer' };
+        $(map.up).classList.add('active');
+        $(map.draw).classList.remove('active');
+        $(map.upC).hidden = false;
+        $(map.drawC).hidden = true;
+    };
+
+    const switchToDraw = (kind) => {
+        const map = kind === 'signature'
+            ? { up: 'uploadOption', draw: 'drawOption', upC: 'uploadContainer', drawC: 'drawContainer', pad: () => signaturePad }
+            : { up: 'uploadParafOption', draw: 'drawParafOption', upC: 'uploadParafContainer', drawC: 'drawParafContainer', pad: () => parafPad };
+        $(map.draw).classList.add('active');
+        $(map.up).classList.remove('active');
+        $(map.upC).hidden = true;
+        $(map.drawC).hidden = false;
+        requestAnimationFrame(() => map.pad().resize());
+    };
+
+    // -------------------------------------------------------------- assets
+
+    const setAsset = (kind, dataURL) => {
+        if (kind === 'signature') {
+            state.signatureImage = dataURL;
+            $('signaturePreview').src = dataURL;
+            $('signaturePreview').classList.add('visible');
+        } else {
+            state.parafImage = dataURL;
+            $('parafPreview').src = dataURL;
+            $('parafPreview').classList.add('visible');
+        }
+        try { localStorage.setItem('signpdf.' + kind, dataURL); } catch (e) { /* quota */ }
+    };
+
+    const restoreAssets = () => {
+        try {
+            const sig = localStorage.getItem('signpdf.signature');
+            const par = localStorage.getItem('signpdf.paraf');
+            if (sig) { state.signatureImage = sig; $('signaturePreview').src = sig; $('signaturePreview').classList.add('visible'); }
+            if (par) { state.parafImage = par; $('parafPreview').src = par; $('parafPreview').classList.add('visible'); }
+        } catch (e) { /* blocked storage */ }
+    };
+
+    const readImageFile = (file, kind, successMsg) => {
+        if (!file.type.startsWith('image/')) return toast(t('msgImageOnly'), 'error');
+        if (file.size > MAX_IMAGE_BYTES) return toast(t('msgFileTooBig'), 'error');
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            setAsset(kind, e.target.result);
+            toast(t(successMsg), 'success');
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const wireDropzone = (zoneId, inputId, browseId, onFile) => {
+        const zone = $(zoneId), input = $(inputId);
+        $(browseId).addEventListener('click', () => input.click());
+        input.addEventListener('change', (e) => {
+            if (e.target.files.length) onFile(e.target.files[0]);
+            input.value = '';
+        });
+        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('active'); });
+        zone.addEventListener('dragleave', () => zone.classList.remove('active'));
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('active');
+            if (e.dataTransfer.files.length) onFile(e.dataTransfer.files[0]);
+        });
+    };
+
+    const initUploads = () => {
+        wireDropzone('signatureDropzone', 'signatureUpload', 'browseSignature',
+            (f) => readImageFile(f, 'signature', 'msgSignatureUploaded'));
+        wireDropzone('parafDropzone', 'parafUpload', 'browseParaf',
+            (f) => readImageFile(f, 'paraf', 'msgInitialsUploaded'));
+        wireDropzone('documentDropzone', 'documentUpload', 'browseDocument', (f) => {
+            const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+            if (!isPdf) return toast(t('msgPdfOnly'), 'error');
+            if (f.size > MAX_PDF_BYTES) return toast(t('msgFileTooBig'), 'error');
+            loadPdfDocument(f);
+        });
+
+        $('uploadOption').addEventListener('click', () => switchToUpload('signature'));
+        $('drawOption').addEventListener('click', () => switchToDraw('signature'));
+        $('uploadParafOption').addEventListener('click', () => switchToUpload('paraf'));
+        $('drawParafOption').addEventListener('click', () => switchToDraw('paraf'));
+    };
+
+    // ------------------------------------------------------------ PDF load
+
+    const loadPdfDocument = async (file) => {
+        $('documentLoading').hidden = false;
+        $('documentPreview').hidden = true;
+        try {
+            const buffer = await file.arrayBuffer();
+            state.pdfBytes = new Uint8Array(buffer);
+            state.pdfFileName = file.name.replace(/\.pdf$/i, '') || 'document';
+
+            // pdf.js transfers its buffer to the worker — hand it a copy.
+            const pdf = await pdfjsLib.getDocument({ data: state.pdfBytes.slice() }).promise;
+
+            state.pdfDocument = pdf;
+            state.totalPages = pdf.numPages;
+            state.currentPage = 1;
+            state.placements = {};
+            state.baseDims = {};
+            $('totalPages').textContent = state.totalPages;
+
+            await renderPage(1);
+            $('documentPreview').hidden = false;
+            $('documentLoading').hidden = true;
+            toast(t('msgDocLoaded', { pages: state.totalPages }), 'success');
+            $('step2').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch (error) {
+            console.error('Error loading PDF:', error);
+            $('documentLoading').hidden = true;
+            toast(t('msgDocError', { error: error.message }), 'error');
+        }
+    };
+
+    // Width/height of a page in PDF points (cached).
+    const getBaseDims = async (pageNum) => {
+        if (!state.baseDims[pageNum]) {
+            const page = await state.pdfDocument.getPage(pageNum);
+            const vp = page.getViewport({ scale: 1 });
+            state.baseDims[pageNum] = { width: vp.width, height: vp.height };
+        }
+        return state.baseDims[pageNum];
+    };
+
+    // ---------------------------------------------------------- pagination
+
+    const createPagination = () => {
+        const pagination = $('pagination');
+        pagination.innerHTML = '';
+        const mkBtn = (label, disabled, onClick, active) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'page-btn' + (active ? ' active' : '');
+            b.innerHTML = label;
+            b.disabled = !!disabled;
+            b.addEventListener('click', onClick);
+            pagination.appendChild(b);
+        };
+        mkBtn('&laquo;', state.currentPage === 1, () => renderPage(state.currentPage - 1));
+        const maxButtons = 5;
+        let start = Math.max(1, state.currentPage - Math.floor(maxButtons / 2));
+        const end = Math.min(state.totalPages, start + maxButtons - 1);
+        start = Math.max(1, end - maxButtons + 1);
+        for (let i = start; i <= end; i++) {
+            mkBtn(String(i), false, () => renderPage(i), i === state.currentPage);
+        }
+        mkBtn('&raquo;', state.currentPage === state.totalPages, () => renderPage(state.currentPage + 1));
+    };
+
+    // ------------------------------------------------------------- render
+
+    let renderToken = 0;
+
+    const renderPage = async (pageNum) => {
+        if (!state.pdfDocument || pageNum < 1 || pageNum > state.totalPages) return;
+        const token = ++renderToken;
+        try {
+            state.currentPage = pageNum;
+            $('currentPage').textContent = pageNum;
+            $('zoomLevel').textContent = Math.round(Z() * 100) + '%';
+            createPagination();
+
+            const page = await state.pdfDocument.getPage(pageNum);
+            const viewport = page.getViewport({ scale: Z() });
+            await getBaseDims(pageNum);
+
+            const temp = document.createElement('canvas');
+            temp.width = viewport.width;
+            temp.height = viewport.height;
+            await page.render({ canvasContext: temp.getContext('2d'), viewport }).promise;
+            if (token !== renderToken) return; // superseded by a newer render
+
+            if (state.fabricCanvas) state.fabricCanvas.dispose();
+            const pdfCanvas = $('pdfCanvas');
+            pdfCanvas.width = viewport.width;
+            pdfCanvas.height = viewport.height;
+            state.fabricCanvas = new fabric.Canvas(pdfCanvas, {
+                selection: true,
+                width: viewport.width,
+                height: viewport.height
             });
+
+            const bg = new fabric.Image(temp, { left: 0, top: 0, selectable: false, evented: false });
+            state.fabricCanvas.setBackgroundImage(bg, state.fabricCanvas.renderAll.bind(state.fabricCanvas));
+
+            (state.placements[pageNum] || []).forEach(p => addPlacementToCanvas(p));
+        } catch (error) {
+            console.error('Error rendering page:', error);
+            toast(t('msgDocError', { error: error.message }), 'error');
         }
-        
-        // Generate filename with date
+    };
+
+    const initZoom = () => {
+        $('zoomIn').addEventListener('click', () => {
+            if (state.zoomIndex < ZOOMS.length - 1) { state.zoomIndex++; renderPage(state.currentPage); }
+        });
+        $('zoomOut').addEventListener('click', () => {
+            if (state.zoomIndex > 0) { state.zoomIndex--; renderPage(state.currentPage); }
+        });
+    };
+
+    // ----------------------------------------------------------- placement
+
+    // placement = { id, kind: 'signature'|'paraf'|'stamp', image, natW, natH,
+    //               leftPt, topPt, scaleXPt, scaleYPt, angle,
+    //               info: {text, fontSizePt} | null }
+
+    const loadImageEl = (src) => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
+
+    const currentIP = async () => {
+        if (state.ipAddress) return state.ipAddress;
+        try {
+            const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(4000) });
+            state.ipAddress = (await res.json()).ip;
+        } catch (e) {
+            state.ipAddress = 'unknown';
+        }
+        return state.ipAddress;
+    };
+
+    const buildInfoText = async (kind) => {
+        if (!$('includeTimestamp').checked || kind === 'stamp') return null;
         const now = new Date();
-        const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        const filename = `signed_document_${dateStr}.pdf`;
-        
-        // Save the PDF
-        const modifiedPdfBytes = await pdfDoc.save();
-        
-        // Create a Blob and download
-        const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
-        
-        downloadFile(blob, filename);
-        
-        progressBar.style.display = 'none';
-        showAlert('Document signed and saved successfully!', 'success');
-        
-    } catch (error) {
-        console.error('Error saving document:', error);
-        progressBar.style.display = 'none';
-        showAlert('Error saving document: ' + error.message, 'error');
-    }
-};
-
-// Download file
-const downloadFile = (content, filename) => {
-    // For PDF files (Blob)
-    if (content instanceof Blob) {
-        const url = URL.createObjectURL(content);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a); // Needed for Firefox
-        a.click();
-        document.body.removeChild(a);
-        
-        setTimeout(() => {
-            URL.revokeObjectURL(url);
-        }, 100);
-        return;
-    }
-    
-    // For HTML or text content
-    const blob = new Blob([content], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    
-    setTimeout(() => {
-        URL.revokeObjectURL(url);
-    }, 100);
-};
-
-// Show alert message
-const showAlert = (message, type) => {
-    const alert = type === 'success' ? successAlert : errorAlert;
-    alert.textContent = message;
-    alert.style.display = 'block';
-    
-    setTimeout(() => {
-        alert.style.display = 'none';
-    }, 3000);
-};
-
-// Event Listeners for Signature Tab
-uploadOption.addEventListener('click', () => {
-    uploadOption.classList.add('active');
-    drawOption.classList.remove('active');
-    uploadContainer.style.display = 'block';
-    drawContainer.style.display = 'none';
-});
-
-drawOption.addEventListener('click', () => {
-    drawOption.classList.add('active');
-    uploadOption.classList.remove('active');
-    drawContainer.style.display = 'flex';
-    uploadContainer.style.display = 'none';
-    
-    // Force canvas resize when switching to draw mode
-    setTimeout(() => {
-        const canvas = document.getElementById('signaturePad');
-        const ctx = canvas.getContext('2d');
-        
-        // Reset canvas dimensions
-        const width = canvas.clientWidth;
-        const height = canvas.clientHeight;
-        canvas.width = width;
-        canvas.height = height;
-        
-        // Reset line style
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-    }, 50);
-});
-
-// Event Listeners for Paraf Tab
-uploadParafOption.addEventListener('click', () => {
-    uploadParafOption.classList.add('active');
-    drawParafOption.classList.remove('active');
-    uploadParafContainer.style.display = 'block';
-    drawParafContainer.style.display = 'none';
-});
-
-drawParafOption.addEventListener('click', () => {
-    drawParafOption.classList.add('active');
-    uploadParafOption.classList.remove('active');
-    drawParafContainer.style.display = 'flex';
-    uploadParafContainer.style.display = 'none';
-    
-    // Force canvas resize when switching to draw mode
-    setTimeout(() => {
-        const canvas = document.getElementById('parafPad');
-        const ctx = canvas.getContext('2d');
-        
-        // Reset canvas dimensions
-        const width = canvas.clientWidth;
-        const height = canvas.clientHeight;
-        canvas.width = width;
-        canvas.height = height;
-        
-        // Reset line style
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-    }, 50);
-});
-
-browseSignature.addEventListener('click', () => {
-    signatureUpload.click();
-});
-
-signatureUpload.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        
-        reader.onload = (event) => {
-            signatureImage = event.target.result;
-            signaturePreview.src = signatureImage;
-            signaturePreview.style.display = 'inline-block';
-            showAlert('Signature uploaded successfully!', 'success');
-        };
-        
-        reader.readAsDataURL(file);
-    }
-});
-
-browseParaf.addEventListener('click', () => {
-    parafUpload.click();
-});
-
-parafUpload.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        
-        reader.onload = (event) => {
-            parafImage = event.target.result;
-            parafPreview.src = parafImage;
-            parafPreview.style.display = 'inline-block';
-            showAlert('Initials uploaded successfully!', 'success');
-        };
-        
-        reader.readAsDataURL(file);
-    }
-});
-
-browseDocument.addEventListener('click', () => {
-    documentUpload.click();
-});
-
-documentUpload.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-        const file = e.target.files[0];
-        if (file.type === 'application/pdf') {
-            loadPdfDocument(file);
-        } else {
-            showAlert('Please upload a PDF document', 'error');
+        const locale = I18N.lang === 'fr' ? 'fr-FR' : 'en-GB';
+        let text = `${t('signedLabel')} ${now.toLocaleDateString(locale)} ${now.toLocaleTimeString(locale)}`;
+        if ($('includeIP').checked) {
+            text += `\n${t('ipLabel')} ${await currentIP()}`;
         }
-    }
-});
+        return { text, fontSizePt: kind === 'paraf' ? 6 : 8 };
+    };
 
-// Drag and drop handlers for signature
-signatureDropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    signatureDropzone.classList.add('active');
-});
+    // Draw a placement on the fabric canvas at the current zoom and keep the
+    // store in sync when the user moves/scales/rotates it.
+    const addPlacementToCanvas = (p, select) => {
+        fabric.Image.fromURL(p.image, (img) => {
+            img.set({
+                left: p.leftPt * Z(),
+                top: p.topPt * Z(),
+                scaleX: p.scaleXPt * Z(),
+                scaleY: p.scaleYPt * Z(),
+                angle: p.angle || 0,
+                placementId: p.id,
+                ...SELECTION_STYLE
+            });
 
-signatureDropzone.addEventListener('dragleave', () => {
-    signatureDropzone.classList.remove('active');
-});
+            let infoText = null;
+            if (p.info) {
+                infoText = new fabric.Text(p.info.text, {
+                    fontSize: p.info.fontSizePt * Z(),
+                    fill: '#666666',
+                    fontFamily: 'Helvetica, Arial, sans-serif',
+                    selectable: false,
+                    evented: false,
+                    placementId: p.id,
+                    isInfo: true
+                });
+            }
 
-signatureDropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    signatureDropzone.classList.remove('active');
-    
-    if (e.dataTransfer.files.length > 0) {
-        const file = e.dataTransfer.files[0];
-        if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            
-            reader.onload = (event) => {
-                signatureImage = event.target.result;
-                signaturePreview.src = signatureImage;
-                signaturePreview.style.display = 'inline-block';
-                showAlert('Signature uploaded successfully!', 'success');
+            const positionInfo = () => {
+                if (!infoText) return;
+                const br = img.getBoundingRect(true, true);
+                infoText.set({ left: br.left, top: br.top + br.height + 4 });
+                infoText.setCoords();
             };
-            
-            reader.readAsDataURL(file);
-        } else {
-            showAlert('Please drop an image file', 'error');
-        }
-    }
-});
 
-// Drag and drop handlers for paraf
-parafDropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    parafDropzone.classList.add('active');
-});
-
-parafDropzone.addEventListener('dragleave', () => {
-    parafDropzone.classList.remove('active');
-});
-
-parafDropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    parafDropzone.classList.remove('active');
-    
-    if (e.dataTransfer.files.length > 0) {
-        const file = e.dataTransfer.files[0];
-        if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            
-            reader.onload = (event) => {
-                parafImage = event.target.result;
-                parafPreview.src = parafImage;
-                parafPreview.style.display = 'inline-block';
-                showAlert('Initials uploaded successfully!', 'success');
+            const syncStore = () => {
+                p.leftPt = img.left / Z();
+                p.topPt = img.top / Z();
+                p.scaleXPt = img.scaleX / Z();
+                p.scaleYPt = img.scaleY / Z();
+                p.angle = img.angle || 0;
             };
-            
-            reader.readAsDataURL(file);
-        } else {
-            showAlert('Please drop an image file', 'error');
+
+            ['moving', 'scaling', 'rotating'].forEach(ev => img.on(ev, () => {
+                positionInfo();
+            }));
+            img.on('modified', () => { syncStore(); positionInfo(); state.fabricCanvas.requestRenderAll(); });
+
+            state.fabricCanvas.add(img);
+            if (infoText) { positionInfo(); state.fabricCanvas.add(infoText); }
+            if (select) state.fabricCanvas.setActiveObject(img);
+            state.fabricCanvas.requestRenderAll();
+        });
+    };
+
+    // Create a placement record + draw it. position: 'center'|'bottom'|'corner'|'stamp'
+    const addPlacement = async (kind, image, position) => {
+        if (!state.pdfDocument) { toast(t('msgNeedDocument'), 'error'); return null; }
+
+        const el = await loadImageEl(image);
+        const dims = await getBaseDims(state.currentPage);
+        const shape = state.stampCfg ? state.stampCfg.shape : 'round';
+        const targetH = kind === 'stamp'
+            ? TARGET_HEIGHTS_PT['stamp' + shape.charAt(0).toUpperCase() + shape.slice(1)] || 100
+            : TARGET_HEIGHTS_PT[kind];
+        const scalePt = targetH / el.naturalHeight;
+        const w = el.naturalWidth * scalePt;
+        const h = targetH;
+
+        let leftPt, topPt, angle = 0;
+        switch (position) {
+            case 'bottom':
+                leftPt = (dims.width - w) / 2;
+                topPt = dims.height - h - 90;
+                break;
+            case 'corner':
+                leftPt = dims.width - w - 28;
+                topPt = dims.height - h - 34;
+                break;
+            case 'stamp':
+                leftPt = dims.width - w - 70;
+                topPt = dims.height - h - 110;
+                if (state.stampCfg && state.stampCfg.tilt) angle = -4 + rng() * 8;
+                break;
+            default: // center
+                leftPt = (dims.width - w) / 2;
+                topPt = dims.height * 0.35;
         }
-    }
-});
 
-// Drag and drop handlers for document
-documentDropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    documentDropzone.classList.add('active');
-});
+        const p = {
+            id: Date.now().toString(36) + Math.floor(rng() * 1e6).toString(36),
+            kind,
+            image,
+            natW: el.naturalWidth,
+            natH: el.naturalHeight,
+            leftPt, topPt,
+            scaleXPt: scalePt,
+            scaleYPt: scalePt,
+            angle,
+            info: await buildInfoText(kind)
+        };
 
-documentDropzone.addEventListener('dragleave', () => {
-    documentDropzone.classList.remove('active');
-});
+        if (!state.placements[state.currentPage]) state.placements[state.currentPage] = [];
+        state.placements[state.currentPage].push(p);
+        addPlacementToCanvas(p, true);
+        toast(t('msgAdded', { page: state.currentPage }), 'success');
+        return p;
+    };
 
-documentDropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    documentDropzone.classList.remove('active');
-    
-    if (e.dataTransfer.files.length > 0) {
-        const file = e.dataTransfer.files[0];
-        if (file.type === 'application/pdf') {
-            loadPdfDocument(file);
-        } else {
-            showAlert('Please drop a PDF document', 'error');
+    // Initials on every page — computed directly in point space, no re-rendering.
+    const addParafToAllPages = async () => {
+        if (!state.parafImage) return toast(t('msgNeedInitials'), 'error');
+        if (!state.pdfDocument) return toast(t('msgNeedDocument'), 'error');
+
+        const el = await loadImageEl(state.parafImage);
+        const scalePt = TARGET_HEIGHTS_PT.paraf / el.naturalHeight;
+        const w = el.naturalWidth * scalePt;
+        const h = TARGET_HEIGHTS_PT.paraf;
+        const info = await buildInfoText('paraf');
+
+        for (let pageNum = 1; pageNum <= state.totalPages; pageNum++) {
+            const dims = await getBaseDims(pageNum);
+            const p = {
+                id: Date.now().toString(36) + pageNum + Math.floor(rng() * 1e6).toString(36),
+                kind: 'paraf',
+                image: state.parafImage,
+                natW: el.naturalWidth,
+                natH: el.naturalHeight,
+                leftPt: dims.width - w - 28,
+                topPt: dims.height - h - 34,
+                scaleXPt: scalePt,
+                scaleYPt: scalePt,
+                angle: 0,
+                info: info ? { ...info } : null
+            };
+            if (!state.placements[pageNum]) state.placements[pageNum] = [];
+            state.placements[pageNum].push(p);
+            if (pageNum === state.currentPage) addPlacementToCanvas(p);
         }
-    }
-});
+        toast(t('msgInitialsAll', { pages: state.totalPages }), 'success');
+    };
 
-// Initialize app
-window.addEventListener('DOMContentLoaded', initApp);
+    // ------------------------------------------------------------ deletion
 
-// Reinitialize signature pad when window is resized
-window.addEventListener('resize', () => {
-    if (drawOption.classList.contains('active')) {
-        const canvas = document.getElementById('signaturePad');
-        const ctx = canvas.getContext('2d');
-        
-        // Save current drawing
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        
-        // Resize canvas
-        canvas.width = canvas.clientWidth;
-        canvas.height = canvas.clientHeight;
-        
-        // Reset line style
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        
-        // Restore drawing
-        ctx.putImageData(imageData, 0, 0);
-    }
-    
-    if (drawParafOption.classList.contains('active')) {
-        const canvas = document.getElementById('parafPad');
-        const ctx = canvas.getContext('2d');
-        
-        // Save current drawing
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        
-        // Resize canvas
-        canvas.width = canvas.clientWidth;
-        canvas.height = canvas.clientHeight;
-        
-        // Reset line style
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        
-        // Restore drawing
-        ctx.putImageData(imageData, 0, 0);
-    }
-});
+    const removeSelected = () => {
+        const canvas = state.fabricCanvas;
+        if (!canvas) return toast(t('msgNothingSelected'), 'error');
+        const active = canvas.getActiveObjects().filter(o => o.placementId && !o.isInfo);
+        if (!active.length) return toast(t('msgNothingSelected'), 'error');
+
+        const ids = new Set(active.map(o => o.placementId));
+        canvas.getObjects().filter(o => ids.has(o.placementId)).forEach(o => canvas.remove(o));
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+
+        const list = state.placements[state.currentPage] || [];
+        state.placements[state.currentPage] = list.filter(p => !ids.has(p.id));
+        toast(t('msgRemoved'), 'success');
+    };
+
+    const initDeletion = () => {
+        $('removeSelected').addEventListener('click', removeSelected);
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+            const tag = (document.activeElement || {}).tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            if (state.fabricCanvas && state.fabricCanvas.getActiveObject()) {
+                e.preventDefault();
+                removeSelected();
+            }
+        });
+    };
+
+    // -------------------------------------------------------------- export
+
+    const dataURLToBytes = (dataURL) => {
+        const b64 = dataURL.split(',')[1];
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes;
+    };
+
+    // Bottom-left corner of a rect at (L,T) size (w,h) rotated `deg` clockwise
+    // around its top-left corner, in top-down point coordinates.
+    const rotatedBottomLeft = (L, T, h, deg) => {
+        const th = (deg * Math.PI) / 180;
+        return { x: L - h * Math.sin(th), y: T + h * Math.cos(th) };
+    };
+
+    // Axis-aligned bounding box of the rotated rect (for info-text placement).
+    const rotatedBBox = (L, T, w, h, deg) => {
+        const th = (deg * Math.PI) / 180;
+        const cos = Math.cos(th), sin = Math.sin(th);
+        const pts = [
+            { x: L, y: T },
+            { x: L + w * cos, y: T + w * sin },
+            { x: L + w * cos - h * sin, y: T + w * sin + h * cos },
+            { x: L - h * sin, y: T + h * cos }
+        ];
+        return {
+            minX: Math.min(...pts.map(p => p.x)),
+            maxY: Math.max(...pts.map(p => p.y))
+        };
+    };
+
+    const saveSignedDocument = async () => {
+        const pages = Object.keys(state.placements).filter(k => (state.placements[k] || []).length);
+        if (!state.pdfDocument || !pages.length) return toast(t('msgNothingToSave'), 'error');
+
+        $('progressBar').hidden = false;
+        $('progress').style.width = '0%';
+
+        try {
+            const { PDFDocument, StandardFonts, rgb, degrees } = PDFLib;
+            const pdfDoc = await PDFDocument.load(state.pdfBytes);
+            const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+            const embedded = new Map(); // dataURL -> embedded image
+
+            const pageNums = pages.map(Number).sort((a, b) => a - b);
+            for (let i = 0; i < pageNums.length; i++) {
+                const pageNum = pageNums[i];
+                const page = pdfDoc.getPage(pageNum - 1);
+                const { height: pageH } = page.getSize();
+
+                for (const p of state.placements[pageNum]) {
+                    if (!embedded.has(p.image)) {
+                        embedded.set(p.image, await pdfDoc.embedPng(dataURLToBytes(p.image)));
+                    }
+                    const img = embedded.get(p.image);
+                    const w = p.natW * p.scaleXPt;
+                    const h = p.natH * p.scaleYPt;
+                    const bl = rotatedBottomLeft(p.leftPt, p.topPt, h, p.angle || 0);
+
+                    page.drawImage(img, {
+                        x: bl.x,
+                        y: pageH - bl.y,
+                        width: w,
+                        height: h,
+                        rotate: degrees(-(p.angle || 0))
+                    });
+
+                    if (p.info) {
+                        const bb = rotatedBBox(p.leftPt, p.topPt, w, h, p.angle || 0);
+                        const fs = p.info.fontSizePt;
+                        page.drawText(p.info.text, {
+                            x: bb.minX,
+                            y: pageH - (bb.maxY + 4 + fs * 0.9),
+                            size: fs,
+                            font: helvetica,
+                            color: rgb(0.4, 0.4, 0.4),
+                            lineHeight: fs * 1.25
+                        });
+                    }
+                }
+                $('progress').style.width = `${((i + 1) / pageNums.length) * 100}%`;
+            }
+
+            const bytes = await pdfDoc.save();
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${state.pdfFileName}-signed.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 500);
+
+            $('progressBar').hidden = true;
+            toast(t('msgSaved'), 'success');
+        } catch (error) {
+            console.error('Error saving document:', error);
+            $('progressBar').hidden = true;
+            toast(t('msgSaveError', { error: error.message }), 'error');
+        }
+    };
+
+    // ------------------------------------------------------------- actions
+
+    const initActions = () => {
+        $('addSignature').addEventListener('click', () => {
+            if (!state.signatureImage) return toast(t('msgNeedSignature'), 'error');
+            addPlacement('signature', state.signatureImage, 'center');
+        });
+        $('addBottomSignature').addEventListener('click', () => {
+            if (!state.signatureImage) return toast(t('msgNeedSignature'), 'error');
+            addPlacement('signature', state.signatureImage, 'bottom');
+        });
+        $('addParaf').addEventListener('click', () => {
+            if (!state.parafImage) return toast(t('msgNeedInitials'), 'error');
+            addPlacement('paraf', state.parafImage, 'corner');
+        });
+        $('addAllParaf').addEventListener('click', addParafToAllPages);
+        $('addStamp').addEventListener('click', () => {
+            if (!state.stampImage) return toast(t('msgNeedStamp'), 'error');
+            addPlacement('stamp', state.stampImage, 'stamp');
+        });
+        $('saveDocument').addEventListener('click', saveSignedDocument);
+    };
+
+    // ----------------------------------------------------------------- go
+
+    const initApp = () => {
+        initChrome();
+        initTabs();
+        initPads();
+        initUploads();
+        initZoom();
+        initDeletion();
+        initActions();
+        restoreAssets();
+
+        StampDesigner.init();
+        state.stampImage = StampDesigner.getImage();
+        state.stampCfg = StampDesigner.getConfig();
+        StampDesigner.onSave((image, cfg) => {
+            state.stampImage = image;
+            state.stampCfg = cfg;
+            toast(t('msgStampSaved'), 'success');
+        });
+    };
+
+    window.addEventListener('DOMContentLoaded', initApp);
+})();

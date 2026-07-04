@@ -1,190 +1,336 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document Signature App</title>
-    <!-- External libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-    <!-- Custom CSS -->
+    <meta name="description" content="SignPDF — sign PDF documents, add initials and design realistic company stamps, 100% in your browser. No account, no upload, no server.">
+    <meta name="theme-color" content="#4361ee">
+    <meta property="og:title" content="SignPDF — Sign, Initial & Stamp PDFs in your browser">
+    <meta property="og:description" content="Draw signatures, add initials, design a realistic company stamp and apply everything to your PDFs. Private by design: nothing leaves your device.">
+    <meta property="og:type" content="website">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#128395;</text></svg>">
+    <title>SignPDF — Sign, Initial &amp; Stamp PDFs</title>
+
+    <!-- External libraries (pinned + SRI) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+            integrity="sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ=="
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"
+            integrity="sha512-CeIsOAsgJnmevfCi2C7Zsyy6bQKi43utIjdA87Q0ZY84oDqnI0uwfM9+bKiIkI75lUeI00WG/+uJzOmuHlesMA=="
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"
+            integrity="sha512-z8IYLHO8bTgFqj+yrPyIJnzBDf7DDhWwiEsk4sY+Oe6J2M+WQequeGS7qioI5vT6rXgVRb4K1UVQC5ER7MKzKQ=="
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- Hero Section -->
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a class="brand" href="#" aria-label="SignPDF home">
+                <span class="brand-mark" aria-hidden="true">🖋️</span>
+                <span class="brand-name">SignPDF</span>
+                <span class="brand-badge">v2.0</span>
+            </a>
+            <div class="topbar-actions">
+                <span class="privacy-pill" data-i18n="privacyPill">100% local — nothing is uploaded</span>
+                <button class="icon-btn" id="langToggle" type="button" aria-label="Switch language">FR</button>
+                <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle dark mode">🌙</button>
+                <a class="icon-btn" href="https://github.com/Bros-AI/SignPDF" target="_blank" rel="noopener" aria-label="GitHub repository">
+                    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                </a>
+            </div>
+        </div>
+    </header>
+
     <div class="hero-section">
-        <h1 class="hero-title">🚀 Sign Documents Like a Pro!</h1>
-        <p class="hero-subtitle">Our powerful document signing platform makes it easy to add your signature to any PDF. Perfect for contracts, agreements, and official documents.</p>
+        <h1 class="hero-title" data-i18n="heroTitle">Sign, Initial &amp; Stamp your PDFs</h1>
+        <p class="hero-subtitle" data-i18n="heroSubtitle">Draw your signature, add initials, design a realistic company stamp — then place everything on your document. Everything runs in your browser: no account, no server, no data leaves your device.</p>
     </div>
-    
+
     <div class="container">
-        <div class="alert alert-success" id="successAlert"></div>
-        <div class="alert alert-error" id="errorAlert"></div>
-        
+        <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
         <div class="app-container">
-            <div class="step" id="step1">
+            <!-- ============================ STEP 1 ============================ -->
+            <section class="step card" id="step1">
                 <div class="step-title">
                     <div class="number">1</div>
-                    <h2>Add Your Signature & Initials</h2>
+                    <h2 data-i18n="step1Title">Create your signature, initials &amp; stamp</h2>
                 </div>
-                
+
                 <div class="signature-tab-container">
-                    <div class="signature-tabs">
-                        <div class="signature-tab active" data-tab="signature">Signature</div>
-                        <div class="signature-tab" data-tab="paraf">Initials/Paraf</div>
+                    <div class="signature-tabs" role="tablist">
+                        <button class="signature-tab active" role="tab" aria-selected="true" data-tab="signature" data-i18n="tabSignature">Signature</button>
+                        <button class="signature-tab" role="tab" aria-selected="false" data-tab="paraf" data-i18n="tabInitials">Initials</button>
+                        <button class="signature-tab" role="tab" aria-selected="false" data-tab="stamp" data-i18n="tabStamp">Company stamp</button>
                     </div>
-                    
-                    <!-- Signature Tab Content -->
-                    <div class="signature-tab-content active" id="signature-tab">
+
+                    <!-- ------- Signature tab ------- -->
+                    <div class="signature-tab-content active" id="signature-tab" role="tabpanel">
                         <div class="signature-options">
-                            <div class="option-btn active" id="uploadOption">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                                Upload Image
-                            </div>
-                            <div class="option-btn" id="drawOption">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
-                                Draw Signature
-                            </div>
+                            <button class="option-btn active" id="uploadOption" type="button">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                <span data-i18n="uploadImage">Upload image</span>
+                            </button>
+                            <button class="option-btn" id="drawOption" type="button">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+                                <span data-i18n="drawSignature">Draw signature</span>
+                            </button>
                         </div>
-                        
+
                         <div id="uploadContainer">
                             <div class="dropzone" id="signatureDropzone">
-                                <p>Drag and drop your signature image here</p>
-                                <p>or</p>
-                                <input type="file" id="signatureUpload" accept="image/*" style="display: none;" />
-                                <button class="upload-btn" id="browseSignature">Browse Files</button>
+                                <p data-i18n="dropSignature">Drag &amp; drop your signature image here</p>
+                                <p class="dropzone-or" data-i18n="or">or</p>
+                                <input type="file" id="signatureUpload" accept="image/*" hidden />
+                                <button class="upload-btn" id="browseSignature" type="button" data-i18n="browseFiles">Browse files</button>
                             </div>
-                            
                             <div class="preview-container">
-                                <img id="signaturePreview" alt="Signature Preview" />
+                                <img id="signaturePreview" alt="Signature preview" />
                             </div>
                         </div>
-                        
-                        <div class="signature-pad-container" id="drawContainer">
-                            <canvas id="signaturePad"></canvas>
+
+                        <div class="signature-pad-container" id="drawContainer" hidden>
+                            <div class="pen-controls">
+                                <div class="swatches" id="penColors" role="group" aria-label="Pen color">
+                                    <button class="swatch active" type="button" data-color="#111827" style="--sw:#111827" aria-label="Black ink"></button>
+                                    <button class="swatch" type="button" data-color="#1e40af" style="--sw:#1e40af" aria-label="Blue ink"></button>
+                                    <button class="swatch" type="button" data-color="#0f766e" style="--sw:#0f766e" aria-label="Teal ink"></button>
+                                </div>
+                                <label class="range-label"><span data-i18n="penWidth">Pen width</span>
+                                    <input type="range" id="penWidth" min="1" max="7" value="3" step="0.5">
+                                </label>
+                            </div>
+                            <canvas id="signaturePad" aria-label="Signature drawing pad"></canvas>
                             <div class="signature-pad-actions">
-                                <button class="action-btn clear-btn" id="clearSignature">Clear</button>
-                                <button class="action-btn save-btn" id="saveSignature">Save Signature</button>
+                                <button class="action-btn clear-btn" id="clearSignature" type="button" data-i18n="clear">Clear</button>
+                                <button class="action-btn save-btn" id="saveSignature" type="button" data-i18n="saveSignature">Save signature</button>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Paraf Tab Content -->
-                    <div class="signature-tab-content" id="paraf-tab">
+
+                    <!-- ------- Initials tab ------- -->
+                    <div class="signature-tab-content" id="paraf-tab" role="tabpanel" hidden>
                         <div class="signature-options">
-                            <div class="option-btn active" id="uploadParafOption">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                                Upload Image
-                            </div>
-                            <div class="option-btn" id="drawParafOption">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
-                                Draw Initials
-                            </div>
+                            <button class="option-btn active" id="uploadParafOption" type="button">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                <span data-i18n="uploadImage">Upload image</span>
+                            </button>
+                            <button class="option-btn" id="drawParafOption" type="button">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+                                <span data-i18n="drawInitials">Draw initials</span>
+                            </button>
                         </div>
-                        
+
                         <div id="uploadParafContainer">
                             <div class="dropzone" id="parafDropzone">
-                                <p>Drag and drop your initials image here</p>
-                                <p>or</p>
-                                <input type="file" id="parafUpload" accept="image/*" style="display: none;" />
-                                <button class="upload-btn" id="browseParaf">Browse Files</button>
+                                <p data-i18n="dropInitials">Drag &amp; drop your initials image here</p>
+                                <p class="dropzone-or" data-i18n="or">or</p>
+                                <input type="file" id="parafUpload" accept="image/*" hidden />
+                                <button class="upload-btn" id="browseParaf" type="button" data-i18n="browseFiles">Browse files</button>
                             </div>
-                            
                             <div class="preview-container">
-                                <img id="parafPreview" alt="Initials Preview" style="max-width: 150px; max-height: 80px; display: none;" />
+                                <img id="parafPreview" alt="Initials preview" />
                             </div>
                         </div>
-                        
-                        <div class="signature-pad-container" id="drawParafContainer" style="display: none;">
-                            <canvas id="parafPad"></canvas>
+
+                        <div class="signature-pad-container" id="drawParafContainer" hidden>
+                            <canvas id="parafPad" aria-label="Initials drawing pad"></canvas>
                             <div class="signature-pad-actions">
-                                <button class="action-btn clear-btn" id="clearParaf">Clear</button>
-                                <button class="action-btn save-btn" id="saveParaf">Save Initials</button>
+                                <button class="action-btn clear-btn" id="clearParaf" type="button" data-i18n="clear">Clear</button>
+                                <button class="action-btn save-btn" id="saveParaf" type="button" data-i18n="saveInitials">Save initials</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ------- Stamp designer tab ------- -->
+                    <div class="signature-tab-content" id="stamp-tab" role="tabpanel" hidden>
+                        <p class="stamp-intro" data-i18n="stampIntro">Design a realistic stamp for your own company — curved text, ink color and natural wear included.</p>
+
+                        <div class="stamp-designer">
+                            <div class="stamp-form">
+                                <div class="field-group">
+                                    <span class="field-label" data-i18n="stampShape">Shape</span>
+                                    <div class="segmented" id="stampShape" role="group">
+                                        <button type="button" class="seg-btn active" data-value="round" data-i18n="shapeRound">Round</button>
+                                        <button type="button" class="seg-btn" data-value="oval" data-i18n="shapeOval">Oval</button>
+                                        <button type="button" class="seg-btn" data-value="rect" data-i18n="shapeRect">Rectangular</button>
+                                    </div>
+                                </div>
+
+                                <label class="field-group">
+                                    <span class="field-label" data-i18n="stampTopText">Top text (curved)</span>
+                                    <input type="text" id="stampTop" maxlength="60" value="MA SOCIÉTÉ SARL" autocomplete="organization">
+                                </label>
+
+                                <label class="field-group">
+                                    <span class="field-label" data-i18n="stampBottomText">Bottom text (curved)</span>
+                                    <input type="text" id="stampBottom" maxlength="60" value="PARIS — FRANCE">
+                                </label>
+
+                                <label class="field-group">
+                                    <span class="field-label" data-i18n="stampCenterLines">Center lines (one per line)</span>
+                                    <textarea id="stampLines" rows="4" maxlength="240">12 RUE DE L'EXEMPLE
+75001 PARIS
+SIRET 123 456 789 00012
+Tél. 01 23 45 67 89</textarea>
+                                </label>
+
+                                <div class="field-row">
+                                    <div class="field-group">
+                                        <span class="field-label" data-i18n="stampInk">Ink color</span>
+                                        <div class="swatches" id="stampColors" role="group" aria-label="Ink color">
+                                            <button class="swatch active" type="button" data-color="#2f4e9e" style="--sw:#2f4e9e" aria-label="Blue"></button>
+                                            <button class="swatch" type="button" data-color="#1f2430" style="--sw:#1f2430" aria-label="Black"></button>
+                                            <button class="swatch" type="button" data-color="#b3282d" style="--sw:#b3282d" aria-label="Red"></button>
+                                            <button class="swatch" type="button" data-color="#1d6b3c" style="--sw:#1d6b3c" aria-label="Green"></button>
+                                            <button class="swatch" type="button" data-color="#5b2d8e" style="--sw:#5b2d8e" aria-label="Purple"></button>
+                                        </div>
+                                    </div>
+                                    <label class="field-group">
+                                        <span class="field-label" data-i18n="stampFont">Font</span>
+                                        <select id="stampFont">
+                                            <option value="sans" selected data-i18n="fontSans">Sans-serif (modern)</option>
+                                            <option value="serif" data-i18n="fontSerif">Serif (classic)</option>
+                                            <option value="mono" data-i18n="fontMono">Typewriter</option>
+                                        </select>
+                                    </label>
+                                </div>
+
+                                <div class="field-row">
+                                    <label class="field-group">
+                                        <span class="field-label" data-i18n="stampBorder">Border</span>
+                                        <select id="stampBorder">
+                                            <option value="double" selected data-i18n="borderDouble">Double line</option>
+                                            <option value="single" data-i18n="borderSingle">Single line</option>
+                                        </select>
+                                    </label>
+                                    <label class="field-group">
+                                        <span class="field-label" data-i18n="stampSeparator">Separators</span>
+                                        <select id="stampSeparator">
+                                            <option value="star" selected>★</option>
+                                            <option value="dot">●</option>
+                                            <option value="none" data-i18n="sepNone">None</option>
+                                        </select>
+                                    </label>
+                                </div>
+
+                                <label class="range-label"><span data-i18n="stampWear">Ink wear / texture</span>
+                                    <input type="range" id="stampWear" min="0" max="100" value="35">
+                                </label>
+                                <label class="range-label"><span data-i18n="stampPressure">Uneven pressure</span>
+                                    <input type="range" id="stampPressure" min="0" max="100" value="40">
+                                </label>
+
+                                <div class="check-row">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="stampShowDate">
+                                        <span data-i18n="stampShowDate">Include today's date</span>
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="stampTilt" checked>
+                                        <span data-i18n="stampTilt">Natural tilt when placed</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="stamp-preview-panel">
+                                <div class="stamp-preview-frame">
+                                    <canvas id="stampPreview" aria-label="Stamp preview"></canvas>
+                                </div>
+                                <div class="stamp-preview-actions">
+                                    <button class="action-btn" id="stampShuffle" type="button" title="New ink texture">🎲 <span data-i18n="stampShuffle">New texture</span></button>
+                                    <button class="action-btn" id="stampDownload" type="button">⬇ <span data-i18n="stampDownload">PNG</span></button>
+                                    <button class="action-btn save-btn" id="stampUse" type="button" data-i18n="stampUse">Save stamp</button>
+                                </div>
+                                <p class="fine-print" data-i18n="stampLegal">Only create stamps for organizations you are authorized to represent.</p>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            
-            <div class="step" id="step2">
+            </section>
+
+            <!-- ============================ STEP 2 ============================ -->
+            <section class="step card" id="step2">
                 <div class="step-title">
                     <div class="number">2</div>
-                    <h2>Upload Document</h2>
+                    <h2 data-i18n="step2Title">Upload your document</h2>
                 </div>
-                
+
                 <div class="dropzone" id="documentDropzone">
-                    <p>Drag and drop your PDF document here</p>
-                    <p>or</p>
-                    <input type="file" id="documentUpload" accept=".pdf" style="display: none;" />
-                    <button class="upload-btn" id="browseDocument">Browse Files</button>
+                    <p data-i18n="dropDocument">Drag &amp; drop your PDF document here</p>
+                    <p class="dropzone-or" data-i18n="or">or</p>
+                    <input type="file" id="documentUpload" accept="application/pdf,.pdf" hidden />
+                    <button class="upload-btn" id="browseDocument" type="button" data-i18n="browseFiles">Browse files</button>
                 </div>
-                
-                <div class="loading" id="documentLoading" style="display: none;">
-                    <div class="spinner"></div>
+
+                <div class="loading" id="documentLoading" hidden>
+                    <div class="spinner" role="status" aria-label="Loading"></div>
                 </div>
-                
-                <div class="document-preview" id="documentPreview">
-                    <div>
-                        <p>Page <span id="currentPage">1</span> of <span id="totalPages">1</span></p>
+
+                <div class="document-preview" id="documentPreview" hidden>
+                    <div class="doc-toolbar">
                         <div class="pagination" id="pagination"></div>
+                        <p class="page-indicator"><span data-i18n="page">Page</span> <span id="currentPage">1</span> / <span id="totalPages">1</span></p>
+                        <div class="zoom-controls" role="group" aria-label="Zoom">
+                            <button class="icon-btn" id="zoomOut" type="button" aria-label="Zoom out">−</button>
+                            <span class="zoom-level" id="zoomLevel">150%</span>
+                            <button class="icon-btn" id="zoomIn" type="button" aria-label="Zoom in">+</button>
+                        </div>
                     </div>
-                    
                     <div class="canvas-container">
                         <canvas id="pdfCanvas"></canvas>
                     </div>
                 </div>
-            </div>
-            
-            <div class="step" id="step3">
+            </section>
+
+            <!-- ============================ STEP 3 ============================ -->
+            <section class="step card" id="step3">
                 <div class="step-title">
                     <div class="number">3</div>
-                    <h2>Sign Your Document</h2>
+                    <h2 data-i18n="step3Title">Place &amp; export</h2>
                 </div>
-                
-                <p>Position your signature on the document by dragging it to the desired location.</p>
-                <p>Use the controls below to navigate between pages and add signatures to multiple pages.</p>
-                
+
+                <p class="step-hint" data-i18n="step3Hint">Drag, resize and rotate items directly on the page. Select an item and press Delete to remove it.</p>
+
+                <div class="options-row">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="includeTimestamp" checked>
+                        <span data-i18n="optTimestamp">Add date &amp; time under signatures</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="includeIP">
+                        <span data-i18n="optIP">Also include my IP address</span>
+                    </label>
+                </div>
+
                 <div class="document-actions">
-                    <button class="action-btn primary-btn" id="addSignature">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
-                        Add Signature
-                    </button>
-                    <button class="action-btn primary-btn" id="addBottomSignature">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
-                        Add to Bottom
-                    </button>
-                    <button class="action-btn info-btn" id="addParaf">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15h18"></path><path d="M3 7h18"></path><path d="M3 11h18"></path></svg>
-                        Add Initials
-                    </button>
-                    <button class="action-btn warning-btn" id="addAllParaf">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-                        Paraf All Pages
-                    </button>
-                    <button class="action-btn success-btn" id="saveDocument">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="8 17 12 21 16 17"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"></path></svg>
-                        Save Signed Document
-                    </button>
+                    <button class="action-btn primary-btn" id="addSignature" type="button">✍️ <span data-i18n="addSignature">Add signature</span></button>
+                    <button class="action-btn primary-btn" id="addBottomSignature" type="button">⬇️ <span data-i18n="addBottom">Signature at bottom</span></button>
+                    <button class="action-btn info-btn" id="addParaf" type="button">🔤 <span data-i18n="addInitials">Add initials</span></button>
+                    <button class="action-btn warning-btn" id="addAllParaf" type="button">📑 <span data-i18n="initialAll">Initial every page</span></button>
+                    <button class="action-btn stamp-btn" id="addStamp" type="button">🏷️ <span data-i18n="addStamp">Add stamp</span></button>
+                    <button class="action-btn danger-btn" id="removeSelected" type="button">🗑️ <span data-i18n="removeSelected">Remove selected</span></button>
+                    <button class="action-btn success-btn" id="saveDocument" type="button">💾 <span data-i18n="saveDocument">Download signed PDF</span></button>
                 </div>
-                
-                <div class="progress-bar" id="progressBar">
+
+                <div class="progress-bar" id="progressBar" hidden>
                     <div class="progress" id="progress"></div>
                 </div>
-            </div>
+            </section>
         </div>
     </div>
-    
+
     <footer class="footer">
-        <p>Created with ❤️ by <a href="https://github.com/BrosG" target="_blank">Gauthier Bros</a></p>
+        <p><span data-i18n="footerMade">Created with ❤️ by</span> <a href="https://github.com/BrosG" target="_blank" rel="noopener">Gauthier Bros</a> · <span data-i18n="footerPrivacy">Your files never leave your device.</span></p>
     </footer>
-    
-    <!-- PDF.js worker script -->
+
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     </script>
-    
-    <!-- Custom JavaScript -->
+    <script src="i18n.js"></script>
+    <script src="stamp.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
