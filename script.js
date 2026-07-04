@@ -869,7 +869,7 @@
 
             $('progressBar').hidden = true;
             toast(t('msgSaved'), 'success');
-            maybeShowSupport();
+            openSupportModal(); // fires together with the download
         } catch (error) {
             console.error('Error saving document:', error);
             $('progressBar').hidden = true;
@@ -899,16 +899,6 @@
     const closeSupportModal = () => {
         $('supportOverlay').hidden = true;
         document.body.style.overflow = '';
-    };
-
-    // Shown once per session, right after a successful export — the download
-    // is never blocked, the modal only rides along with it.
-    const maybeShowSupport = () => {
-        try {
-            if (sessionStorage.getItem('signpdf.support.shown')) return;
-            sessionStorage.setItem('signpdf.support.shown', '1');
-        } catch (e) { /* blocked storage — still show once */ }
-        setTimeout(openSupportModal, 900);
     };
 
     const initSupportModal = () => {
