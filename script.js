@@ -19,7 +19,7 @@
     const ZOOMS = [0.75, 1, 1.25, 1.5, 2, 2.5];
     const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
     const MAX_PDF_BYTES = 60 * 1024 * 1024;
-    const TARGET_HEIGHTS_PT = { signature: 60, paraf: 32, stampRound: 115, stampOval: 95, stampRect: 85 };
+    const TARGET_HEIGHTS_PT = { signature: 60, paraf: 32, stampRound: 115, stampOval: 95, stampRect: 85, stampStarCenter: 115, stampHanko: 62 };
     const SELECTION_STYLE = { cornerColor: '#4361ee', cornerSize: 10, transparentCorners: false, borderColor: '#4361ee' };
 
     // ---------------------------------------------------------------- state
@@ -565,9 +565,9 @@
 
         const el = await loadImageEl(image);
         const dims = await getBaseDims(state.currentPage);
-        const shape = state.stampCfg ? state.stampCfg.shape : 'round';
+        const style = state.stampCfg ? (state.stampCfg.special || state.stampCfg.shape) : 'round';
         const targetH = kind === 'stamp'
-            ? TARGET_HEIGHTS_PT['stamp' + shape.charAt(0).toUpperCase() + shape.slice(1)] || 100
+            ? TARGET_HEIGHTS_PT['stamp' + style.charAt(0).toUpperCase() + style.slice(1)] || 100
             : TARGET_HEIGHTS_PT[kind];
         const scalePt = targetH / el.naturalHeight;
         const w = el.naturalWidth * scalePt;

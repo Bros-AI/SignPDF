@@ -22,6 +22,7 @@ Everything is processed locally with `pdf.js`, `fabric.js` and `pdf-lib`. Your f
 - Signatures and initials are remembered between visits (stored locally in your browser)
 
 ### 🏷️ Company stamp designer *(new in v2)*
+- **11 country styles**: 🇫🇷 France (SIRET), 🇧🇪 Belgique, 🇨🇭 Suisse, 🇩🇪 Deutschland (Firmenstempel), 🇬🇧 UK (registered-company oval), 🇺🇸 US (corporate seal), 🇪🇸 España, 🇮🇹 Italia, 🇮🇳 India, 🇨🇳 中国 (star-center chop) and 🇯🇵 日本 (square hanko with vertical right-to-left columns)
 - **Round, oval or rectangular** stamps with single or double borders
 - **Curved text** along the top and bottom arcs, star/dot separators, center lines (address, SIRET, phone…)
 - 5 ink colors, 3 typefaces, optional date line

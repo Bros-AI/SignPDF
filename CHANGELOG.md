@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0 — 2026-07-04
+
+### Added
+- **Country stamp styles**: 11 authentic presets — France, Belgique, Suisse, Deutschland, United Kingdom, United States, España, Italia, India, plus two dedicated renderers: the Chinese star-center company chop (公章) and the Japanese square hanko with vertical right-to-left character columns.
+- Selecting a country fills shape, border, ink color, font, separators and template text; picking a shape manually switches back to Custom.
+
 ## 2.0.0 — 2026-07-04
 
 ### Added

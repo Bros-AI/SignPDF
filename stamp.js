@@ -21,7 +21,73 @@
     const FONTS = {
         sans: '"Arial Narrow", Arial, Helvetica, sans-serif',
         serif: 'Georgia, "Times New Roman", serif',
-        mono: '"Courier New", Courier, monospace'
+        mono: '"Courier New", Courier, monospace',
+        cjkCn: '"SimSun", "Songti SC", "Noto Serif SC", serif',
+        cjkJp: '"Yu Mincho", "MS Mincho", "Hiragino Mincho ProN", serif'
+    };
+
+    // -------------------------------------------------------- country styles
+
+    // Authentic default layouts per country. `special` switches the renderer:
+    // 'starCenter' = Chinese company chop, 'hanko' = Japanese square seal.
+    const PRESETS = {
+        fr: {
+            shape: 'round', color: '#2f4e9e', font: 'sans', border: 'double', separator: 'star',
+            top: 'MA SOCIÉTÉ SARL', bottom: 'PARIS — FRANCE',
+            lines: ["12 RUE DE L'EXEMPLE", '75001 PARIS', 'SIRET 123 456 789 00012', 'Tél. 01 23 45 67 89']
+        },
+        be: {
+            shape: 'rect', color: '#2f4e9e', font: 'sans', border: 'double', separator: 'none',
+            top: 'EXEMPLE SPRL', bottom: '',
+            lines: ['Rue de l’Exemple 12', '1000 BRUXELLES', 'TVA BE 0123.456.789', 'RPM Bruxelles']
+        },
+        ch: {
+            shape: 'rect', color: '#1f2430', font: 'sans', border: 'single', separator: 'none',
+            top: 'MUSTER AG', bottom: '',
+            lines: ['Musterstrasse 12', '8001 ZÜRICH', 'CHE-123.456.789 MWST', 'Tel. 044 123 45 67']
+        },
+        de: {
+            shape: 'rect', color: '#1e3a8a', font: 'sans', border: 'single', separator: 'none',
+            top: 'MUSTER GMBH', bottom: '',
+            lines: ['Musterstraße 12', '10115 BERLIN', 'Tel. 030 1234567', 'USt-IdNr. DE123456789']
+        },
+        uk: {
+            shape: 'oval', color: '#2f4e9e', font: 'serif', border: 'double', separator: 'star',
+            top: 'ACME TRADING LTD', bottom: 'LONDON',
+            lines: ['Registered in England & Wales', 'Company No. 01234567']
+        },
+        us: {
+            shape: 'round', color: '#1f2430', font: 'serif', border: 'double', separator: 'star',
+            top: 'ACME CORPORATION', bottom: 'DELAWARE',
+            lines: ['★ CORPORATE ★', 'SEAL', 'INCORPORATED 2020']
+        },
+        es: {
+            shape: 'oval', color: '#2f4e9e', font: 'sans', border: 'double', separator: 'dot',
+            top: 'COMERCIAL EJEMPLO S.L.', bottom: 'MADRID',
+            lines: ['CIF B-12345678', 'C/ Mayor 1, 28001']
+        },
+        it: {
+            shape: 'round', color: '#2f4e9e', font: 'serif', border: 'double', separator: 'star',
+            top: 'ESEMPIO S.R.L.', bottom: 'MILANO',
+            lines: ['Via Roma 1, 20121', 'P.IVA 01234567890']
+        },
+        in: {
+            shape: 'round', color: '#2f4e9e', font: 'sans', border: 'double', separator: 'star',
+            top: 'EXAMPLE PVT. LTD.', bottom: 'NEW DELHI',
+            lines: ['For EXAMPLE PVT. LTD.', 'Authorised Signatory']
+        },
+        cn: {
+            shape: 'round', color: '#b3282d', font: 'serif', border: 'single', separator: 'none',
+            special: 'starCenter',
+            top: '北京示例科技有限公司', bottom: '0123456789123',
+            lines: []
+        },
+        jp: {
+            shape: 'rect', color: '#b3282d', font: 'serif', border: 'single', separator: 'none',
+            special: 'hanko',
+            top: '株式会社見本', bottom: '',
+            lines: []
+        }
     };
 
     const font = (cfg, size, bold) =>
@@ -295,6 +361,83 @@
         drawCenterLines(ctx, cfg, lines, W / 2, H / 2, W - 110, 42);
     };
 
+    // Chinese company chop: single thick ring, company name along most of the
+    // circle, five-pointed star in the center, numeric code along the bottom.
+    const drawChop = (ctx, cfg, W, H) => {
+        const cx = W / 2, cy = H / 2;
+        const r = W / 2 - 16;
+
+        ctx.strokeStyle = cfg.color;
+        ctx.fillStyle = cfg.color;
+        ctx.lineWidth = 16;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Star
+        const R = r * 0.30, ri = R * 0.42;
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+            const rad = i % 2 === 0 ? R : ri;
+            const a = -Math.PI / 2 + (i * Math.PI) / 5;
+            const x = cx + rad * Math.cos(a), y = cy + rad * Math.sin(a);
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Company name around the ring (wide arc over the top).
+        if (cfg.topText) {
+            const tr = r - 78;
+            const saved = FONTS.serif;
+            FONTS.serif = FONTS.cjkCn; // chop glyphs use a CJK serif
+            const size = fitArcFontSize(ctx, { ...cfg, font: 'serif' }, cfg.topText, tr, tr, -Math.PI / 2, 84, Math.PI * 1.5);
+            drawEllipseText(ctx, { ...cfg, font: 'serif' }, cfg.topText, cx, cy, tr, tr, -Math.PI / 2, size, false);
+            FONTS.serif = saved;
+        }
+
+        // Numeric code along the bottom, upright.
+        if (cfg.bottomText) {
+            const br = r - 60;
+            const size = fitArcFontSize(ctx, { ...cfg, font: 'sans' }, cfg.bottomText, br, br, Math.PI / 2, 30, Math.PI * 0.6);
+            drawEllipseText(ctx, { ...cfg, font: 'sans' }, cfg.bottomText, cx, cy, br, br, Math.PI / 2, size, true);
+        }
+    };
+
+    // Japanese company hanko: square seal, very thick border, characters in
+    // vertical columns read right-to-left.
+    const drawHanko = (ctx, cfg, W, H) => {
+        const pad = 22;
+        ctx.strokeStyle = cfg.color;
+        ctx.fillStyle = cfg.color;
+        ctx.lineWidth = 26;
+        roundRect(ctx, pad, pad, W - pad * 2, H - pad * 2, 34);
+        ctx.stroke();
+
+        const text = cfg.topText || (cfg.lines[0] || '');
+        if (!text) return;
+        const chars = [...text];
+        const cols = chars.length <= 5 ? 1 : 2;
+        const rows = Math.ceil(chars.length / cols);
+
+        const inner = W - (pad + 40) * 2;
+        const cellH = inner / rows;
+        const cellW = inner / cols;
+        const size = Math.floor(Math.min(cellH, cellW) * 0.92);
+        ctx.font = `bold ${size}px ${FONTS.cjkJp}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Columns right-to-left, characters top-to-bottom.
+        const x0 = W - (pad + 40) - cellW / 2;
+        const y0 = (H - rows * cellH) / 2 + cellH / 2;
+        chars.forEach((c, i) => {
+            const col = Math.floor(i / rows);
+            const row = i % rows;
+            ctx.fillText(c, x0 - col * cellW, y0 + row * cellH);
+        });
+    };
+
     const roundRect = (ctx, x, y, w, h, r) => {
         ctx.beginPath();
         ctx.moveTo(x + r, y);
@@ -310,17 +453,21 @@
     const CANVAS_SIZE = {
         round: [760, 760],
         oval: [980, 660],
-        rect: [980, 560]
+        rect: [980, 560],
+        starCenter: [760, 760],
+        hanko: [640, 640]
     };
 
     const render = (cfg) => {
-        const [W, H] = CANVAS_SIZE[cfg.shape] || CANVAS_SIZE.round;
+        const [W, H] = CANVAS_SIZE[cfg.special] || CANVAS_SIZE[cfg.shape] || CANVAS_SIZE.round;
 
         // Draw the crisp artwork on its own layer.
         const art = document.createElement('canvas');
         art.width = W; art.height = H;
         const actx = art.getContext('2d');
-        if (cfg.shape === 'rect') drawRect(actx, cfg, W, H);
+        if (cfg.special === 'starCenter') drawChop(actx, cfg, W, H);
+        else if (cfg.special === 'hanko') drawHanko(actx, cfg, W, H);
+        else if (cfg.shape === 'rect') drawRect(actx, cfg, W, H);
         else drawRoundOrOval(actx, cfg, W, H);
 
         // Realism pass (deterministic per seed).
@@ -351,7 +498,10 @@
     const readConfig = () => {
         const shapeBtn = document.querySelector('#stampShape .seg-btn.active');
         const colorBtn = document.querySelector('#stampColors .swatch.active');
+        const country = document.getElementById('stampCountry').value;
         return {
+            country,
+            special: (PRESETS[country] || {}).special || null,
             shape: shapeBtn ? shapeBtn.dataset.value : 'round',
             topText: document.getElementById('stampTop').value.trim().toUpperCase(),
             bottomText: document.getElementById('stampBottom').value.trim().toUpperCase(),
@@ -387,12 +537,37 @@
         preview.style.height = Math.round(canvas.height / 3.2) + 'px';
     };
 
+    // Fill the form with a country preset (keeps wear/pressure/date settings).
+    const applyPreset = (country) => {
+        const p = PRESETS[country];
+        if (!p) { schedulePreview(); return; }
+        document.getElementById('stampTop').value = p.top;
+        document.getElementById('stampBottom').value = p.bottom;
+        document.getElementById('stampLines').value = p.lines.join('\n');
+        document.getElementById('stampFont').value = p.font;
+        document.getElementById('stampBorder').value = p.border;
+        document.getElementById('stampSeparator').value = p.separator;
+        document.querySelectorAll('#stampShape .seg-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.value === p.shape));
+        document.querySelectorAll('#stampColors .swatch').forEach(b =>
+            b.classList.toggle('active', b.dataset.color === p.color));
+        schedulePreview();
+    };
+
     const init = () => {
-        // Segmented shape control
+        // Country preset
+        document.getElementById('stampCountry').addEventListener('change', (e) => {
+            applyPreset(e.target.value);
+        });
+
+        // Segmented shape control — picking a shape opts out of special
+        // country renderers (chop/hanko), so switch back to "Custom".
         document.querySelectorAll('#stampShape .seg-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('#stampShape .seg-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+                const country = document.getElementById('stampCountry');
+                if ((PRESETS[country.value] || {}).special) country.value = 'custom';
                 schedulePreview();
             });
         });
@@ -443,6 +618,7 @@
         try {
             const saved = JSON.parse(localStorage.getItem('signpdf.stamp.cfg'));
             if (saved) {
+                document.getElementById('stampCountry').value = saved.country || 'custom';
                 document.getElementById('stampTop').value = saved.topText || '';
                 document.getElementById('stampBottom').value = saved.bottomText || '';
                 document.getElementById('stampLines').value = (saved.lines || []).join('\n');
